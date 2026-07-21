@@ -1,0 +1,18 @@
+# Byte-compiled / cache
+__pycache__/
+*.pyc
+
+# Generated data (large binary outputs, regenerate with the script)
+datasets/mseed/*.mseed
+datasets/sonifications/*.wav
+datasets/plot/*.png
+
+# Keep the folder structure in git even though contents are ignored
+!datasets/mseed/.gitkeep
+!datasets/sonifications/.gitkeep
+!datasets/plot/.gitkeep
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+.vscode/
