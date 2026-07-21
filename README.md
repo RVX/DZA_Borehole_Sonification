@@ -222,7 +222,7 @@ python DZA01.py --pick 0 sonify --channel HH2
 # A slower, longer sonification (20x instead of the default 200x)
 python DZA01.py sonify --speed-up 20
 
-# A direct "real-time listen": fetch exactly 15 minutes and play it back at 1x
+# A 15-minute listening piece at the 100x audible floor (fetches 25h of raw data)
 python DZA01.py --listen-minutes 15 fetch plot sonify play
 ```
 
@@ -237,18 +237,26 @@ reusing a saved file:
 
 - **When fetching** (`fetch` is one of the actions): the amount of raw
   data to download is computed as `--listen-minutes * --speed-up`. If you
-  don't also pass `--speed-up` explicitly, it defaults to `1x` — i.e. a
-  direct, real-time listen (fetch exactly N minutes, play back at normal
-  speed). Pass `--speed-up` explicitly to request *more* raw data on
-  purpose, e.g. `--listen-minutes 15 --speed-up 20` fetches 5 hours of
-  data and compresses it into a 15-minute piece. The script prints the
-  raw duration it's about to fetch, and warns if it's a large request
-  (> 6 hours), since long fetches are slow and produce large files.
+  don't also pass `--speed-up` explicitly, it defaults to **100x** — the
+  `MIN_LISTEN_SPEED_UP` floor, below which bandpassed (0.5–10 Hz) ground
+  motion is barely more than a faint, inaudible rumble. So
+  `--listen-minutes 15` alone fetches **25 hours** of raw data by
+  default, in order to actually be worth listening to. Pass `--speed-up`
+  explicitly to request a *different* amount of raw data on purpose, e.g.
+  `--listen-minutes 15 --speed-up 20` fetches only 5 hours and compresses
+  it into a 15-minute piece (quieter/less audible, but faster to fetch).
+  The script prints the raw duration it's about to fetch, and warns if
+  it's a large request (> 6 hours), since long fetches are slower and
+  produce larger files.
 - **When reusing an existing file** (`--pick`/`--file`, no `fetch`):
   `--speed-up` is instead **computed for you** as
-  `(existing recording length) / --listen-minutes`, so a saved 15-minute
-  file becomes a 15-minute sonification (1x) and a saved 5-hour file
-  becomes a 15-minute sonification (~20x).
+  `(existing recording length) / --listen-minutes`, so a saved 25-hour
+  file becomes a 15-minute sonification at 100x. If the saved file is too
+  short to reach the 100x floor for the requested listen length (e.g. a
+  15-minute file can only reach ~1x for a 15-minute listen), the script
+  prints a warning and tells you how much raw data you'd need to fetch to
+  reach 100x instead.
+
 
 ## Understanding the multi-channel output
 

@@ -29,6 +29,7 @@ Examples
   py DZA01.py --pick 2 plot sonify play            # use file #2 from --list
   py DZA01.py --latency 2 --max-latency 60         # near real-time, backs off up to 1h if needed
   py DZA01.py --listen-minutes 15 --speed-up 20    # fetch exactly enough data (5h) for a 15 min listen
+  py DZA01.py --listen-minutes 15                  # same, but at the 100x audible floor (fetches 25h)
   py DZA01.py --pick 0 sonify --listen-minutes 15  # re-stretch an existing file to a 15 min listen
 """
 import os
@@ -82,6 +83,11 @@ COMPONENT_COLORS = {
 DEFAULT_SPEED_UP = 200   # audio playback speed multiplier
 DEFAULT_DURATION = 15.0  # default listening piece length, minutes
 
+# Below this speed-up, seismic ground motion (bandpassed to 0.5-10 Hz) is
+# barely audible as anything more than a faint rumble. Used as the implicit
+# floor for --listen-minutes when the user hasn't set --speed-up explicitly.
+MIN_LISTEN_SPEED_UP = 100.0
+
 
 # ---------------------------------------------------------------------------
 # CLI
@@ -126,9 +132,10 @@ def parse_args():
     sonify_group.add_argument(
         "--speed-up", type=float, default=None,
         help=f"Playback speed multiplier for sonification (default: {DEFAULT_SPEED_UP}, or "
-             f"1x if --listen-minutes is set and no --speed-up is given). "
-             f"A 15 min recording at 200x becomes ~4.5s of audio -- lower this for longer "
-             f"audio (e.g. 20x turns 15 min into ~45s).",
+             f"{MIN_LISTEN_SPEED_UP:.0f}x if --listen-minutes is set and no --speed-up is "
+             f"given, since ground motion is barely audible below that). A 15 min recording "
+             f"at 200x becomes ~4.5s of audio -- lower this for longer audio (e.g. 20x turns "
+             f"15 min into ~45s).",
     )
     sonify_group.add_argument(
         "--channel", default=None, metavar="SEED_ID_SUBSTRING",
@@ -140,9 +147,10 @@ def parse_args():
         "--listen-minutes", type=float, default=None, metavar="MINUTES",
         help="Target length of the sonified audio, in minutes. If fetching new data, this "
              "calculates and overrides --duration (raw minutes needed = MINUTES x --speed-up, "
-             "or just MINUTES of raw data if --speed-up isn't given, i.e. a direct real-time "
-             "listen). If reusing an existing file, this instead overrides --speed-up to "
-             "stretch/compress that recording to exactly this listening length.",
+             f"or MINUTES x {MIN_LISTEN_SPEED_UP:.0f} if --speed-up isn't given, since that's "
+             "the floor for ground motion to be clearly audible). If reusing an existing file, "
+             "this instead overrides --speed-up to stretch/compress that recording to exactly "
+             "this listening length (warns if the result falls below the audible floor).",
     )
 
     select_group = parser.add_argument_group("file selection (skip fetching)")
@@ -478,12 +486,14 @@ def main():
     speed_up_explicit = args.speed_up is not None
 
     if args.listen_minutes and fetch_needed:
-        # Without an explicit --speed-up, assume a direct real-time listen
-        # (fetch exactly --listen-minutes of raw data, speed-up ~1x) rather
-        # than silently multiplying by the DEFAULT_SPEED_UP (200x -> hours
-        # of data). Pass --speed-up explicitly to fetch extra raw data on
-        # purpose (e.g. --listen-minutes 15 --speed-up 20 -> 5h fetch).
-        effective_speed_up = args.speed_up if speed_up_explicit else 1.0
+        # Without an explicit --speed-up, use MIN_LISTEN_SPEED_UP (100x) as a
+        # sensible floor rather than silently multiplying by the plain
+        # DEFAULT_SPEED_UP (200x). Below ~100x, seismic ground motion is
+        # barely audible as more than a faint rumble, so a "listen" piece
+        # needs at least that much compression to actually be worth hearing.
+        # Pass --speed-up explicitly to request a different amount of raw
+        # data on purpose (e.g. --listen-minutes 15 --speed-up 20 -> 5h fetch).
+        effective_speed_up = args.speed_up if speed_up_explicit else MIN_LISTEN_SPEED_UP
         required_duration = args.listen_minutes * effective_speed_up
         hours = required_duration / 60
         print(
@@ -522,10 +532,20 @@ def main():
             f"speed-up {args.speed_up:.2f}x to produce a {args.listen_minutes:.1f} min "
             f"sonification (overrides --speed-up)."
         )
+        if args.speed_up < MIN_LISTEN_SPEED_UP:
+            needed_min = target_s * MIN_LISTEN_SPEED_UP / 60
+            print(
+                f"[warn] {args.speed_up:.2f}x is below the ~{MIN_LISTEN_SPEED_UP:.0f}x "
+                f"floor for audible ground motion; this piece will likely sound like a "
+                f"faint rumble. Fetch a longer recording (>= {needed_min:.0f} min) to "
+                f"reach {MIN_LISTEN_SPEED_UP:.0f}x for the same {args.listen_minutes:.1f} "
+                f"min listen length."
+            )
     elif args.listen_minutes and fetch_needed:
         # We just fetched exactly enough data for this listen length; speed-up
-        # is whatever we assumed above (1x unless the user set --speed-up).
-        args.speed_up = args.speed_up if speed_up_explicit else 1.0
+        # is whatever we assumed above (MIN_LISTEN_SPEED_UP unless the user
+        # set --speed-up explicitly).
+        args.speed_up = args.speed_up if speed_up_explicit else MIN_LISTEN_SPEED_UP
     elif args.speed_up is None:
         args.speed_up = DEFAULT_SPEED_UP
 
