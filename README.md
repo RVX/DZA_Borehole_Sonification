@@ -1,20 +1,45 @@
 # DZA01 Seismic Sonification Toolkit
 
-A single-file Python command-line tool that fetches real seismic waveform
-data from the **DZA01 station (KB network, KIT / GPI seismic network)**,
-renders it as a styled spectrogram + waveform plot, and "sonifies" it into
-audible `.wav` audio by speeding it up — turning ground-motion recordings
-into sound.
+A single-file Python CLI that pulls real seismic waveform data from the
+**DZA01 borehole station (`KB` network, KIT/GPI seismic network)**, plots
+it as a spectrogram + waveform figure, and **sonifies** it: it speeds up
+the recording so ground motion normally far below the range of human
+hearing (0.5–10 Hz) becomes audible sound.
 
-Built for an art/science sonification project, but it is plain, documented
-scientific tooling: standard FDSN data retrieval via
-[ObsPy](https://docs.obspy.org/), standard instrument-response removal and
-bandpass filtering, and a straightforward "resample the timebase" approach
-to audification. Nothing here is exotic — it is meant to be read, checked,
-and reused freely.
+It is plain, auditable scientific tooling, not a black box: standard FDSN
+retrieval via [ObsPy](https://docs.obspy.org/), standard instrument-response
+removal and bandpass filtering, and a transparent "resample the timebase"
+audification method — no proprietary DSP, no hidden steps.
 
 **Author:** Victor Mazon, July 2026
 **License:** GNU General Public License v3.0 (see [LICENSE](LICENSE))
+
+---
+
+## Pipeline overview
+
+**Operationally** — one command chains four independent stages, each of
+which can also be run on its own against a previously saved file:
+
+```mermaid
+flowchart LR
+    A["FDSN web service\nws.gpi.kit.edu\nKB.DZA11 + KB.DZA13, HH*\n6 traces @ 100 Hz"] --> B["fetch\nremove_response -> detrend -> bandpass 0.5-10 Hz -> taper"]
+    B --> C[(".mseed")]
+    C --> D["plot\nspectrogram (Z) + per-channel waveform panels"]
+    C --> E["sonify\npick 1 or all channels\nresample timebase x speed-up"]
+    D --> F([".png"])
+    E --> G([".wav"])
+    G --> H(["play"])
+```
+
+**Conceptually** — sonification here is nothing more than a frequency
+shift: the same samples are kept, only the clock they're played back at
+changes, moving inaudible ground motion up into the audible range:
+
+```mermaid
+flowchart LR
+    A["Ground motion\n0.5-10 Hz\ninaudible / felt, not heard"] -->|"x speed-up\ne.g. 100x-200x"| B["Playback audio\n50 Hz-2 kHz+\naudible"]
+```
 
 ---
 
@@ -31,6 +56,7 @@ and reused freely.
 - [Command-line reference](#command-line-reference)
 - [Recipes](#recipes)
 - [Understanding `--listen-minutes`](#understanding---listen-minutes)
+- [Understanding `--hours-back` and `--days-back`](#understanding---hours-back-and---days-back)
 - [Understanding the multi-channel output](#understanding-the-multi-channel-output)
 - [Output folder layout](#output-folder-layout)
 - [Data source and limitations](#data-source-and-limitations)
@@ -61,23 +87,30 @@ on a fresh 15-minute window of data.
 ### 1. Fetch
 
 `do_fetch()` uses `obspy.clients.fdsn.Client` to query the KIT/GPI FDSN
-web service (`http://ws.gpi.kit.edu`) for:
+web service (`http://ws.gpi.kit.edu`) for exactly one time window:
 
 - **Network:** `KB`
-- **Station:** `DZA1*` (a wildcard — this actually matches **two**
-  physical sub-stations, `DZA11` and `DZA13`, each with 3 component
-  channels, so a typical fetch returns **6 traces**, all sampled at
-  100 Hz — see [Understanding the multi-channel output](#understanding-the-multi-channel-output))
-- **Channel:** `HH*` (high-broadband, high-gain seismometer channels)
+- **Station:** `DZA1*` — a wildcard matching **two** physical
+  sub-stations, `DZA11` and `DZA13`, each with 3 component channels, so a
+  single fetch returns **6 traces**, all sampled at 100 Hz (see
+  [Understanding the multi-channel output](#understanding-the-multi-channel-output)).
+- **Channel:** `HH*` — high-broadband, high-gain seismometer channels.
+- **Window length:** `--duration` minutes (default 15), or `--hours-back`
+  hours, or a full day per file in `--days-back` batch mode — see
+  [Understanding `--hours-back` and `--days-back`](#understanding---hours-back-and---days-back).
 
-Real-time seismic data servers usually have a data latency of some
-minutes before the very latest recordings are available. Rather than
-guessing a fixed delay, the script tries to fetch as close to "now" as
-possible (`--latency`, default 2 minutes) and automatically backs off in
-steps (`--latency-step`, default 2 minutes) up to a ceiling
-(`--max-latency`, default 60 minutes) if the server doesn't have data
-yet. This ceiling is generous by default because FDSN data latency can
-vary noticeably with the season (e.g. CEST vs. CET) and server load.
+FDSN servers typically lag "now" by a few minutes before the latest data
+is available. Instead of guessing a fixed delay, the script requests as
+close to "now" as possible (`--latency`, default 2 minutes) and, if the
+server has no data yet, retries with progressively larger latency
+(`--latency-step`, default 2 minutes) up to a ceiling (`--max-latency`,
+default 60 minutes). Every fetch prints the exact UTC start/end time and
+latency margin actually used, so the window is never opaque:
+
+```
+[fetch] Got data from 2026-07-22T15:00:02Z to 2026-07-22T15:01:02Z UTC
+(10.0 min latency margin from now, 1.0 min duration). Adjust the margin with --latency.
+```
 
 Once data is retrieved, the standard ObsPy processing chain is applied:
 
@@ -116,20 +149,20 @@ Saved as `.png` under `datasets/plot/`.
 
 ### 3. Sonify
 
-`do_sonify()` takes **one** trace (see
-[Understanding the multi-channel output](#understanding-the-multi-channel-output)
-for why there are several to choose from), normalizes it to the -1..1
-range, and writes it out as 16-bit PCM `.wav` audio.
+`do_sonify()` normalizes trace data to the -1..1 range and writes it out
+as 16-bit PCM `.wav` audio. By default it picks **one** trace (see
+[Understanding the multi-channel output](#understanding-the-multi-channel-output));
+pass `--channel all` to sonify **every** trace in the file instead, each
+written to its own `.wav` (`{name}_{channel}_{speed}x.wav`).
 
 The "speeding up" is deliberately simple and transparent: the same
 samples are kept, but the **declared sample rate of the `.wav` file** is
 multiplied by the speed-up factor. A seismometer sampling at 100 Hz
-written out at `100 Hz * 200 = 20000 Hz` will play back 200x faster, which
-shifts everything (including all frequency content) up by the same
-factor. This is a **linear time/frequency stretch**, not a pitch-preserving
-time-stretch — by design, since the goal is literally to make inaudible
-low-frequency ground motion (< 10 Hz) audible by moving it into the
-human hearing range.
+written out at `100 Hz * 200 = 20000 Hz` plays back 200x faster, shifting
+all frequency content up by exactly that factor. This is a **linear
+time/frequency stretch**, not a pitch-preserving time-stretch — by
+design, since the goal is to move inaudible low-frequency ground motion
+(< 10 Hz) into the human hearing range, not to disguise the speed change.
 
 ```
 output_duration = input_duration / speed_up_factor
@@ -188,6 +221,8 @@ python DZA01.py [actions ...] [options]
 | Option | Default | Description |
 |---|---|---|
 | `--duration MIN` | `15` | Length of the window to fetch, in minutes. |
+| `--hours-back HOURS` | — | Convenience alternative to `--duration`, in hours. Overrides `--duration`. |
+| `--days-back N` | — | Batch mode: fetch `N` separate ~24h windows, one full day at a time, stepping back from now. Overrides `--duration`/`--hours-back`/`--listen-minutes`; `play` is skipped. See [below](#understanding---hours-back-and---days-back). |
 | `--latency MIN` | `2` | How far back from "now" to end the window. Smaller = closer to real time, but the server may not have the data yet. |
 | `--max-latency MIN` | `60` | Ceiling the script backs off to if `--latency` is too aggressive. |
 | `--latency-step MIN` | `2` | How much to increase latency per retry when backing off. |
@@ -197,7 +232,7 @@ python DZA01.py [actions ...] [options]
 | Option | Default | Description |
 |---|---|---|
 | `--speed-up N` | `200` | Playback speed multiplier. 15 min of data at 200x ≈ 4.5 s of audio. |
-| `--channel SUBSTRING` | first trace | Which of the (typically 6) channels to sonify, matched as a case-insensitive substring against the trace ID, e.g. `DZA11`, `HHZ`, `DZA13.00.HH1`. |
+| `--channel SUBSTRING` \| `all` | first trace | Which of the (typically 6) channels to sonify, matched as a case-insensitive substring against the trace ID, e.g. `DZA11`, `HHZ`, `DZA13.00.HH1`. Pass `all` to sonify every channel into its own `.wav`. |
 | `--listen-minutes MIN` | — | Target sonification length; see [below](#understanding---listen-minutes). |
 
 **File selection (skip fetching):**
@@ -224,6 +259,15 @@ python DZA01.py sonify --speed-up 20
 
 # A 15-minute listening piece at the 100x audible floor (fetches 25h of raw data)
 python DZA01.py --listen-minutes 15 fetch plot sonify play
+
+# Grab the last 24 hours in one window instead of computing --duration in minutes
+python DZA01.py --hours-back 24 --speed-up 100 fetch plot sonify
+
+# Sonify every channel in a saved file, not just the default one
+python DZA01.py --pick 0 sonify --channel all
+
+# Build a 10-day dataset of 24h files (fetch + plot + sonify each day, no play)
+python DZA01.py --days-back 10 --speed-up 100 fetch plot sonify
 ```
 
 ## Understanding `--listen-minutes`
@@ -257,6 +301,31 @@ reusing a saved file:
   prints a warning and tells you how much raw data you'd need to fetch to
   reach 100x instead.
 
+
+## Understanding `--hours-back` and `--days-back`
+
+Both are alternatives to specifying `--duration` in minutes, aimed at
+pytremor-style "lookback window" workflows:
+
+- **`--hours-back HOURS`** fetches a single window of that many hours,
+  ending `--latency` minutes before now. It overrides `--duration` but
+  behaves exactly like a normal `fetch` otherwise — one `.mseed` file,
+  one optional `plot`, one optional `sonify`/`play`.
+- **`--days-back N`** is batch mode: it runs `fetch` **N times**, each
+  time for a distinct ~24h window one full day further back than the
+  last (day 0 = most recent day before latency, day 1 = the day before
+  that, and so on), producing **N separate `.mseed` files**. If `plot`
+  and/or `sonify` are also requested, each of the N files is processed
+  in turn. A failed day (e.g. no data available that far back) is
+  skipped with a warning rather than aborting the whole batch. `play` is
+  always skipped in this mode — it exists to build a dataset, not to
+  listen interactively. `--days-back` overrides `--duration`,
+  `--hours-back`, and `--listen-minutes` if any are also given.
+
+```bash
+# 10 days of 24h files, plotted and sonified at 100x — a batch dataset
+python DZA01.py --days-back 10 --speed-up 100 fetch plot sonify
+```
 
 ## Understanding the multi-channel output
 

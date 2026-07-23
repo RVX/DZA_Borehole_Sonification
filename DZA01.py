@@ -31,6 +31,9 @@ Examples
   py DZA01.py --listen-minutes 15 --speed-up 20    # fetch exactly enough data (5h) for a 15 min listen
   py DZA01.py --listen-minutes 15                  # same, but at the 100x audible floor (fetches 25h)
   py DZA01.py --pick 0 sonify --listen-minutes 15  # re-stretch an existing file to a 15 min listen
+  py DZA01.py --hours-back 24 --speed-up 100       # last 24h of data, sonified at 100x (pytremor-style)
+  py DZA01.py --pick 0 sonify --channel all        # sonify every channel in the file, one .wav each
+  py DZA01.py --days-back 10 --speed-up 100        # last 10 days as 10 daily files, all plotted+sonified
 """
 import os
 import sys
@@ -111,6 +114,21 @@ def parse_args():
         help=f"Length of the data window to fetch, in minutes (default: {DEFAULT_DURATION:.0f})",
     )
     fetch_group.add_argument(
+        "--hours-back", type=float, default=None, metavar="HOURS",
+        help="Convenience alternative to --duration, in hours instead of minutes (pytremor-style "
+             "lookback window): fetch the last HOURS of data, ending --latency minutes ago. "
+             "e.g. --hours-back 24 for 'the last 24h from now'. Overrides --duration.",
+    )
+    fetch_group.add_argument(
+        "--days-back", type=int, default=None, metavar="DAYS",
+        help="Batch mode: fetch DAYS separate ~24h windows, stepping back one full day at a "
+             "time from now (day 1 ends --latency minutes ago; day 2 is the 24h before that; "
+             "etc). Each day is saved, plotted and sonified independently -- useful for "
+             "building a multi-day dataset for review, e.g. --days-back 10 for the last 10 "
+             "days as 10 separate daily files. Overrides --duration/--hours-back/--listen-minutes; "
+             "'play' is skipped in this mode (too many files to play automatically).",
+    )
+    fetch_group.add_argument(
         "--latency", type=float, default=2.0,
         help="How many minutes back from now to end the window (smaller = closer "
              "to real time, but the server may not have the data yet). Default: 2",
@@ -141,6 +159,7 @@ def parse_args():
         "--channel", default=None, metavar="SEED_ID_SUBSTRING",
         help="Which trace to sonify when multiple stations/channels are present, matched "
              "as a substring against the trace id (e.g. 'DZA11' or 'HHZ' or 'DZA13.00.HH1'). "
+             "Pass 'all' to sonify every channel in the file, each saved as its own .wav. "
              "Default: the first trace in the file.",
     )
     sonify_group.add_argument(
@@ -205,7 +224,11 @@ def fetch_closest_to_real_time(client, latency_min, duration_min, max_latency_mi
     while True:
         try:
             st, inv, starttime, endtime = fetch_once(client, latency, duration_min)
-            print(f"[fetch] Got data with {latency:.1f} min latency (duration {duration_min:.1f} min)")
+            print(
+                f"[fetch] Got data from {starttime} to {endtime} UTC "
+                f"({latency:.1f} min latency margin from now, {duration_min:.1f} min duration). "
+                f"Adjust the margin with --latency."
+            )
             return st, inv, starttime, endtime
         except Exception as exc:
             if latency >= max_latency_min:
@@ -223,7 +246,11 @@ def do_fetch(args):
     st, inv, starttime, endtime = fetch_closest_to_real_time(
         client, args.latency, args.duration, args.max_latency, args.latency_step
     )
+    return _process_and_save(st, inv, starttime, prefix="fetch")
 
+
+def _process_and_save(st, inv, starttime, prefix="fetch"):
+    """Apply the standard processing chain and save as .mseed. Returns the saved path."""
     st.remove_response(inventory=inv)
     st.detrend("demean")
     st.detrend("linear")
@@ -233,9 +260,40 @@ def do_fetch(args):
     timestamp = starttime.strftime("%Y-%m-%d-%H-%M")
     mseed_path = os.path.join(MSEED_DIR, f"DZA1_{timestamp}.mseed")
     st.write(mseed_path, format="MSEED")
-    print(f"[fetch] Saved waveform data to {mseed_path}")
-    describe_stream(st, prefix="fetch")
+    print(f"[{prefix}] Saved waveform data to {mseed_path}")
+    describe_stream(st, prefix=prefix)
     return mseed_path
+
+
+def do_fetch_batch(days_back, latency_min, max_latency_min, latency_step_min):
+    """Batch-fetch `days_back` separate ~24h windows, going back day by day from now
+    (day 1 = the most recent 24h ending `latency_min` minutes ago, day 2 = the 24h
+    before that, etc). Each day is fetched, processed and saved independently -- a
+    day with no/partial data is skipped with a warning rather than aborting the
+    whole batch. Returns a chronologically sorted list of saved .mseed paths.
+    """
+    client = Client(FDSN_URL)
+    day_minutes = 24 * 60
+    mseed_paths = []
+    print(f"[fetch] Batch mode: {days_back} day(s) x 24h, starting {latency_min:.1f} min "
+          f"before now and stepping back one day at a time.")
+    for day_index in range(days_back):
+        day_latency = latency_min + day_index * day_minutes
+        try:
+            st, inv, starttime, endtime = fetch_closest_to_real_time(
+                client, day_latency, day_minutes, day_latency + max_latency_min, latency_step_min
+            )
+        except Exception as exc:
+            print(f"[fetch] Day {day_index + 1}/{days_back}: no data available ({exc}) -- skipping.")
+            continue
+        mseed_path = _process_and_save(st, inv, starttime, prefix="fetch")
+        print(f"[fetch] Day {day_index + 1}/{days_back} done -> {mseed_path}")
+        mseed_paths.append(mseed_path)
+
+    mseed_paths.sort()  # filenames are timestamp-based, so this is chronological order
+    print(f"[fetch] Batch complete: {len(mseed_paths)}/{days_back} day(s) fetched successfully.")
+    return mseed_paths
+
 
 
 # ---------------------------------------------------------------------------
@@ -354,14 +412,15 @@ def pick_trace(st, channel_filter=None):
     if len(st) > 1:
         others = [t.id for t in st if t.id != tr.id]
         print(f"[sonify] {len(st)} channels available; using '{tr.id}'. "
-              f"Ignoring: {', '.join(others)}. Use --channel to pick a different one.")
+              f"Ignoring: {', '.join(others)}. Use --channel to pick a different one, "
+              f"or --channel all to sonify every one of them.")
     return tr
 
 
-def do_sonify(mseed_path, speed_up_factor=DEFAULT_SPEED_UP, channel_filter=None):
-    st = read(mseed_path)
-    tr = pick_trace(st, channel_filter)
-
+def _sonify_one_trace(tr, mseed_path, speed_up_factor, channel_tag=None):
+    """Sonify a single trace to a .wav file. channel_tag, if given, is embedded in the
+    filename so multiple channels from the same recording don't collide (used by
+    --channel all)."""
     # normalize to -1..1 then scale to 16-bit PCM range
     data = tr.data.astype(np.float64)
     data -= data.mean()
@@ -376,13 +435,31 @@ def do_sonify(mseed_path, speed_up_factor=DEFAULT_SPEED_UP, channel_filter=None)
     output_duration_s = input_duration_s / speed_up_factor
 
     base = os.path.splitext(os.path.basename(mseed_path))[0]
-    wav_path = os.path.join(SONIFY_DIR, f"{base}_{int(speed_up_factor)}x.wav")
+    if channel_tag:
+        wav_path = os.path.join(SONIFY_DIR, f"{base}_{channel_tag}_{int(speed_up_factor)}x.wav")
+    else:
+        wav_path = os.path.join(SONIFY_DIR, f"{base}_{int(speed_up_factor)}x.wav")
     wavfile.write(wav_path, wav_sample_rate, audio)
     print(f"[sonify] Saved audio to {wav_path}")
     print(f"[sonify]   trace: {tr.id}  |  input: {input_duration_s:.1f}s  ->  "
           f"output: {output_duration_s:.1f}s at {speed_up_factor:.0f}x speed "
           f"(wav sample rate {wav_sample_rate} Hz)")
     return wav_path
+
+
+def do_sonify(mseed_path, speed_up_factor=DEFAULT_SPEED_UP, channel_filter=None):
+    st = read(mseed_path)
+
+    if channel_filter and channel_filter.strip().lower() == "all":
+        print(f"[sonify] --channel all: sonifying all {len(st)} channel(s) into separate .wav files.")
+        wav_paths = []
+        for tr in st:
+            channel_tag = tr.id.replace(".", "-")
+            wav_paths.append(_sonify_one_trace(tr, mseed_path, speed_up_factor, channel_tag))
+        return wav_paths
+
+    tr = pick_trace(st, channel_filter)
+    return _sonify_one_trace(tr, mseed_path, speed_up_factor)
 
 
 # ---------------------------------------------------------------------------
@@ -421,13 +498,19 @@ def print_file_list():
         print(f"  [{i}] {os.path.basename(f)}")
 
 
-def find_wav_for(mseed_path, speed_up_factor):
+def find_wav_for(mseed_path, speed_up_factor, channel_filter=None):
     base = os.path.splitext(os.path.basename(mseed_path))[0]
+
+    if channel_filter and channel_filter.strip().lower() == "all":
+        matches = sorted(glob.glob(os.path.join(SONIFY_DIR, f"{base}_*_{int(speed_up_factor)}x.wav")))
+        return matches if matches else None
+
     candidate = os.path.join(SONIFY_DIR, f"{base}_{int(speed_up_factor)}x.wav")
     if os.path.exists(candidate):
         return candidate
-    # fall back to any sonification of this same recording, any speed
-    matches = sorted(glob.glob(os.path.join(SONIFY_DIR, f"{base}_*x.wav")))
+    # fall back to any single-channel sonification of this same recording, any speed
+    # (the [0-9] guard avoids matching the per-channel files from --channel all)
+    matches = sorted(glob.glob(os.path.join(SONIFY_DIR, f"{base}_[0-9]*x.wav")))
     return matches[-1] if matches else None
 
 
@@ -452,6 +535,8 @@ def main():
 
     if args.duration <= 0:
         raise SystemExit(f"--duration must be > 0 (got {args.duration})")
+    if args.hours_back is not None and args.hours_back <= 0:
+        raise SystemExit(f"--hours-back must be > 0 (got {args.hours_back})")
     if args.latency < 0:
         raise SystemExit(f"--latency must be >= 0 (got {args.latency})")
     if args.max_latency < args.latency:
@@ -460,6 +545,8 @@ def main():
         raise SystemExit(f"--speed-up must be > 0 (got {args.speed_up})")
     if args.listen_minutes is not None and args.listen_minutes <= 0:
         raise SystemExit(f"--listen-minutes must be > 0 (got {args.listen_minutes})")
+    if args.days_back is not None and args.days_back <= 0:
+        raise SystemExit(f"--days-back must be > 0 (got {args.days_back})")
 
     if args.list:
         print_file_list()
@@ -484,6 +571,31 @@ def main():
 
     fetch_needed = "fetch" in actions
     speed_up_explicit = args.speed_up is not None
+
+    if args.days_back is not None and fetch_needed:
+        if args.listen_minutes:
+            print("[info] --days-back overrides --listen-minutes; ignoring --listen-minutes.")
+        effective_speed_up = args.speed_up if speed_up_explicit else DEFAULT_SPEED_UP
+        mseed_paths = do_fetch_batch(args.days_back, args.latency, args.max_latency, args.latency_step)
+        if not mseed_paths:
+            raise SystemExit("Batch fetch produced no files (no data available for any requested day).")
+        for i, path in enumerate(mseed_paths):
+            print(f"[batch] Processing file {i + 1}/{len(mseed_paths)}: {os.path.basename(path)}")
+            if "plot" in actions:
+                do_plot(path)
+            if "sonify" in actions:
+                do_sonify(path, effective_speed_up, args.channel)
+        if "play" in actions:
+            print("[batch] 'play' is skipped in --days-back batch mode (too many files to auto-play).")
+        print(f"[batch] Done: {len(mseed_paths)} day(s) fetched and processed.")
+        return
+
+    if args.hours_back is not None and fetch_needed:
+        args.duration = args.hours_back * 60
+        print(
+            f"[info] --hours-back {args.hours_back:.1f}h -> fetching the last "
+            f"{args.duration:.0f} min of data (overrides --duration)."
+        )
 
     if args.listen_minutes and fetch_needed:
         # Without an explicit --speed-up, use MIN_LISTEN_SPEED_UP (100x) as a
@@ -558,10 +670,11 @@ def main():
 
     if "play" in actions:
         if wav_path is None:
-            wav_path = find_wav_for(mseed_path, args.speed_up)
+            wav_path = find_wav_for(mseed_path, args.speed_up, args.channel)
         if wav_path is None:
             wav_path = do_sonify(mseed_path, args.speed_up, args.channel)
-        do_play(wav_path)
+        for p in (wav_path if isinstance(wav_path, list) else [wav_path]):
+            do_play(p)
 
 
 if __name__ == "__main__":
