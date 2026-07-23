@@ -41,6 +41,12 @@ flowchart LR
     A["Ground motion<br/>0.5-10 Hz<br/>inaudible / felt, not heard"] -->|"x speed-up<br/>e.g. 100x-200x"| B["Playback audio<br/>50 Hz-2 kHz+<br/>audible"]
 ```
 
+**Example output** — the `plot` action for a real 24h `--days-back` fetch:
+a spectrogram of the vertical channel on top, and one waveform panel per
+trace below (all 6 available channels):
+
+![Example spectrogram and waveform plot of a 24h DZA01 recording](docs/images/example_plot.png)
+
 ---
 
 ## Table of contents
