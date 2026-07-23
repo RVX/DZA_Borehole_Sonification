@@ -23,10 +23,10 @@ which can also be run on its own against a previously saved file:
 
 ```mermaid
 flowchart LR
-    A["FDSN web service\nws.gpi.kit.edu\nKB.DZA11 + KB.DZA13, HH*\n6 traces @ 100 Hz"] --> B["fetch\nremove_response -> detrend -> bandpass 0.5-10 Hz -> taper"]
+    A["FDSN web service<br/>ws.gpi.kit.edu<br/>KB.DZA11 + KB.DZA13, HH*<br/>6 traces @ 100 Hz"] --> B["fetch<br/>remove_response -&gt; detrend -&gt; bandpass 0.5-10 Hz -&gt; taper"]
     B --> C[(".mseed")]
-    C --> D["plot\nspectrogram (Z) + per-channel waveform panels"]
-    C --> E["sonify\npick 1 or all channels\nresample timebase x speed-up"]
+    C --> D["plot<br/>spectrogram (Z) + per-channel waveform panels"]
+    C --> E["sonify<br/>pick 1 or all channels<br/>resample timebase x speed-up"]
     D --> F([".png"])
     E --> G([".wav"])
     G --> H(["play"])
@@ -38,7 +38,7 @@ changes, moving inaudible ground motion up into the audible range:
 
 ```mermaid
 flowchart LR
-    A["Ground motion\n0.5-10 Hz\ninaudible / felt, not heard"] -->|"x speed-up\ne.g. 100x-200x"| B["Playback audio\n50 Hz-2 kHz+\naudible"]
+    A["Ground motion<br/>0.5-10 Hz<br/>inaudible / felt, not heard"] -->|"x speed-up<br/>e.g. 100x-200x"| B["Playback audio<br/>50 Hz-2 kHz+<br/>audible"]
 ```
 
 ---
