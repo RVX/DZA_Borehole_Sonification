@@ -67,6 +67,10 @@ from scipy.io import wavfile
 NETWORK = "KB"
 CHANNEL = "HH*"
 FDSN_URL = "http://ws.gpi.kit.edu"
+# ObsPy's FDSN Client defaults to a 120s timeout, which can make a broken/slow
+# connection look like a long hang with no feedback. Kept explicit and a bit
+# tighter so a genuinely unreachable server fails fast instead of stalling the CLI.
+FDSN_TIMEOUT_S = 30
 
 # DZA station naming: DZA<site><1|3>, e.g. DZA11, DZA13, DZA31, DZA33...
 #   suffix 1 -> surface sensor (0 m depth)
@@ -427,6 +431,28 @@ def describe_stream(st, prefix="info", station_pattern=None):
         print(f"  - {tr.id}  |  {tr.stats.sampling_rate:.1f} Hz  |  {duration_s:.1f}s  |  {tr.stats.npts} samples")
 
 
+def load_stream(mseed_path):
+    """Read a .mseed file into a Stream, with clear user-facing errors instead of a
+    raw traceback if the file is missing or not valid MSEED data. Also drops any
+    zero-length traces (a rare edge case from very fragmented gaps) with a warning,
+    since plotting/sonifying code assumes every trace has at least one sample."""
+    if not os.path.exists(mseed_path):
+        raise SystemExit(f"File not found: {mseed_path}")
+    try:
+        st = read(mseed_path)
+    except Exception as exc:
+        raise SystemExit(f"Could not read {mseed_path} as MSEED data: {exc}") from exc
+
+    empty_ids = [tr.id for tr in st if tr.stats.npts == 0]
+    if empty_ids:
+        print(f"[warn] Dropping {len(empty_ids)} zero-length trace(s) from "
+              f"{os.path.basename(mseed_path)}: {', '.join(empty_ids)}", file=sys.stderr)
+        st.traces = [tr for tr in st if tr.stats.npts > 0]
+    if len(st) == 0:
+        raise SystemExit(f"{mseed_path} contains no usable (non-empty) traces.")
+    return st
+
+
 def fetch_closest_to_real_time(client, latency_min, duration_min, max_latency_min, latency_step_min, station_pattern):
     """Try to get data as close to 'now' as possible, backing off only if needed."""
     latency = latency_min
@@ -450,15 +476,19 @@ def fetch_closest_to_real_time(client, latency_min, duration_min, max_latency_mi
 
 
 def do_fetch(args, station_pattern, file_prefix):
-    """Fetch, process and save one waveform window. Returns the saved .mseed path."""
-    client = Client(FDSN_URL)
+    """Fetch, process and save one waveform window. Returns (mseed_path, processed
+    Stream) -- the Stream is already fully processed and in memory by the time it's
+    written to disk, so callers can reuse it directly instead of re-reading the file
+    they just wrote."""
+    client = Client(FDSN_URL, timeout=FDSN_TIMEOUT_S)
     st, inv, starttime, endtime = fetch_closest_to_real_time(
         client, args.latency, args.duration, args.max_latency, args.latency_step, station_pattern
     )
-    return _process_and_save(
+    mseed_path = _process_and_save(
         st, inv, starttime, prefix="fetch", file_prefix=file_prefix,
         freqmin=args.freqmin, freqmax=args.freqmax, station_pattern=station_pattern,
     )
+    return mseed_path, st
 
 
 def _process_and_save(st, inv, starttime, prefix="fetch", file_prefix="DZA1",
@@ -503,7 +533,7 @@ def _process_and_save(st, inv, starttime, prefix="fetch", file_prefix="DZA1",
         channel_orientations=channel_orientations,
     )
     metadata_path = os.path.splitext(mseed_path)[0] + ".json"
-    with open(metadata_path, "w") as f:
+    with open(metadata_path, "w", encoding="utf-8") as f:
         json.dump(metadata, f, indent=2)
 
     return mseed_path
@@ -517,7 +547,7 @@ def do_fetch_batch(days_back, latency_min, max_latency_min, latency_step_min,
     day with no/partial data is skipped with a warning rather than aborting the
     whole batch. Returns a chronologically sorted list of saved .mseed paths.
     """
-    client = Client(FDSN_URL)
+    client = Client(FDSN_URL, timeout=FDSN_TIMEOUT_S)
     day_minutes = 24 * 60
     mseed_paths = []
     print(f"[fetch] Batch mode: {days_back} day(s) x 24h, starting {latency_min:.1f} min "
@@ -569,7 +599,7 @@ def load_germany_outline():
     if _germany_outline_cache is not None:
         return _germany_outline_cache
     try:
-        with open(GERMANY_OUTLINE_PATH) as f:
+        with open(GERMANY_OUTLINE_PATH, encoding="utf-8") as f:
             _germany_outline_cache = json.load(f)["coordinates"]
     except (OSError, ValueError, KeyError):
         _germany_outline_cache = []
@@ -760,7 +790,7 @@ def do_map(sites):
     cause an error -- they simply won't appear in the result.
     """
     station_pattern = build_station_pattern(sites)
-    client = Client(FDSN_URL)
+    client = Client(FDSN_URL, timeout=FDSN_TIMEOUT_S)
     print(f"[map] Querying station metadata for: {station_pattern}")
     inv = client.get_stations(
         network=NETWORK, station=station_pattern,
@@ -890,7 +920,7 @@ def load_fetch_metadata(mseed_path):
     if not os.path.exists(metadata_path):
         return defaults
     try:
-        with open(metadata_path) as f:
+        with open(metadata_path, encoding="utf-8") as f:
             data = json.load(f)
     except (OSError, ValueError):
         return defaults
@@ -927,8 +957,9 @@ def _depth_points_for_stations(station_codes):
     return points
 
 
-def do_plot(mseed_path):
-    st = read(mseed_path)
+def do_plot(mseed_path, st=None):
+    if st is None:
+        st = load_stream(mseed_path)
     base = os.path.splitext(os.path.basename(mseed_path))[0]
     plot_path = os.path.join(PLOT_DIR, f"{base}.png")
     metadata = load_fetch_metadata(mseed_path)
@@ -1186,8 +1217,9 @@ def _sonify_one_trace(tr, mseed_path, speed_up_factor, channel_tag=None):
     return wav_path
 
 
-def do_sonify(mseed_path, speed_up_factor=DEFAULT_SPEED_UP, channel_filter=None):
-    st = read(mseed_path)
+def do_sonify(mseed_path, speed_up_factor=DEFAULT_SPEED_UP, channel_filter=None, st=None):
+    if st is None:
+        st = load_stream(mseed_path)
 
     if channel_filter and channel_filter.strip().lower() == "all":
         print(f"[sonify] --channel all: sonifying all {len(st)} channel(s) into separate .wav files.")
@@ -1216,19 +1248,25 @@ def do_sonify(mseed_path, speed_up_factor=DEFAULT_SPEED_UP, channel_filter=None)
 # Play
 # ---------------------------------------------------------------------------
 def do_play(wav_path):
+    if not os.path.exists(wav_path):
+        print(f"[warn] Cannot play, file not found: {wav_path}", file=sys.stderr)
+        return
     print(f"[play] Playing {wav_path}")
-    if sys.platform.startswith("win"):
-        import winsound
-        winsound.PlaySound(wav_path, winsound.SND_FILENAME)
-    elif sys.platform == "darwin":
-        subprocess.run(["afplay", wav_path], check=False)
-    else:
-        for player in ("paplay", "aplay", "ffplay"):
-            if shutil.which(player):
-                cmd = [player, wav_path] if player != "ffplay" else [player, "-nodisp", "-autoexit", wav_path]
-                subprocess.run(cmd, check=False)
-                return
-        print(f"[play] No audio player found. Open manually: {wav_path}")
+    try:
+        if sys.platform.startswith("win"):
+            import winsound
+            winsound.PlaySound(wav_path, winsound.SND_FILENAME)
+        elif sys.platform == "darwin":
+            subprocess.run(["afplay", wav_path], check=False)
+        else:
+            for player in ("paplay", "aplay", "ffplay"):
+                if shutil.which(player):
+                    cmd = [player, wav_path] if player != "ffplay" else [player, "-nodisp", "-autoexit", wav_path]
+                    subprocess.run(cmd, check=False)
+                    return
+            print(f"[play] No audio player found. Open manually: {wav_path}")
+    except Exception as exc:
+        print(f"[warn] Playback failed for {wav_path}: {exc}", file=sys.stderr)
 
 
 # ---------------------------------------------------------------------------
@@ -1291,6 +1329,11 @@ def main():
         raise SystemExit(f"--latency must be >= 0 (got {args.latency})")
     if args.max_latency < args.latency:
         raise SystemExit("--max-latency must be >= --latency")
+    if args.latency_step <= 0:
+        raise SystemExit(
+            f"--latency-step must be > 0 (got {args.latency_step}); a non-positive "
+            f"step would retry forever at the same latency without ever backing off."
+        )
     if args.speed_up is not None and args.speed_up <= 0:
         raise SystemExit(f"--speed-up must be > 0 (got {args.speed_up})")
     if args.listen_minutes is not None and args.listen_minutes <= 0:
@@ -1324,6 +1367,8 @@ def main():
     # resolve which .mseed file to use
     mseed_path = None
     if args.file:
+        if not os.path.exists(args.file):
+            raise SystemExit(f"--file not found: {args.file}")
         mseed_path = args.file
         actions.discard("fetch")
     elif args.pick is not None:
@@ -1346,7 +1391,8 @@ def main():
                 f"(and the 0.05 Hz corner of DZA11's 20s sensor). Instrument-response removal "
                 f"amplifies noise heavily below a sensor's corner frequency, so results this low "
                 f"should be treated as exploratory/artistic rather than scientifically validated "
-                f"without further review. See README's 'Ultra-low-frequency band' section."
+                f"without further review. See README's 'Ultra-low-frequency band' section.",
+                file=sys.stderr,
             )
 
     if args.days_back is not None and fetch_needed:
@@ -1400,8 +1446,9 @@ def main():
             )
         args.duration = required_duration
 
+    fetched_st = None
     if fetch_needed:
-        mseed_path = do_fetch(args, station_pattern, file_prefix)
+        mseed_path, fetched_st = do_fetch(args, station_pattern, file_prefix)
     elif mseed_path is None:
         files = list_mseed_files()
         if not files:
@@ -1412,11 +1459,19 @@ def main():
         mseed_path = files[-1]
         print(f"[info] Using latest saved file: {mseed_path}")
 
+    # Reused below across describe/listen-minutes/plot/sonify so a single run never
+    # re-reads the same .mseed file from disk more than once: a freshly-fetched
+    # Stream is already fully processed in memory, and an existing file is loaded
+    # once here and shared.
+    preloaded_st = None
     if ("plot" in actions or "sonify" in actions or "play" in actions) and not fetch_needed:
-        describe_stream(read(mseed_path), prefix="info", station_pattern=station_pattern)
+        preloaded_st = load_stream(mseed_path)
+        describe_stream(preloaded_st, prefix="info", station_pattern=station_pattern)
+    current_st = fetched_st if fetched_st is not None else preloaded_st
 
     if args.listen_minutes and not fetch_needed:
-        input_duration_s = stream_duration_seconds(read(mseed_path))
+        st_for_duration = current_st if current_st is not None else load_stream(mseed_path)
+        input_duration_s = stream_duration_seconds(st_for_duration)
         target_s = args.listen_minutes * 60
         args.speed_up = input_duration_s / target_s
         print(
@@ -1431,7 +1486,8 @@ def main():
                 f"floor for audible ground motion; this piece will likely sound like a "
                 f"faint rumble. Fetch a longer recording (>= {needed_min:.0f} min) to "
                 f"reach {MIN_LISTEN_SPEED_UP:.0f}x for the same {args.listen_minutes:.1f} "
-                f"min listen length."
+                f"min listen length.",
+                file=sys.stderr,
             )
     elif args.listen_minutes and fetch_needed:
         # We just fetched exactly enough data for this listen length; speed-up
@@ -1442,11 +1498,11 @@ def main():
         args.speed_up = DEFAULT_SPEED_UP
 
     if "plot" in actions:
-        do_plot(mseed_path)
+        do_plot(mseed_path, st=current_st)
 
     wav_path = None
     if "sonify" in actions:
-        wav_path = do_sonify(mseed_path, args.speed_up, args.channel)
+        wav_path = do_sonify(mseed_path, args.speed_up, args.channel, st=current_st)
 
     if "play" in actions:
         if wav_path is None:
