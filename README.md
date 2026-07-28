@@ -1,10 +1,16 @@
 # DZA01 Seismic Sonification Toolkit
 
 A single-file Python CLI that pulls real seismic waveform data from the
-**DZA01 borehole station (`KB` network, KIT/GPI seismic network)**, plots
+**DZA seismic station network (`KB` network, KIT/GPI, Germany)**, plots
 it as a spectrogram + waveform figure, and **sonifies** it: it speeds up
 the recording so ground motion normally far below the range of human
-hearing (0.5–10 Hz) becomes audible sound.
+hearing (0.5–10 Hz by default, configurable) becomes audible sound.
+
+The DZA network consists of several **sites**, each pairing a surface
+broadband sensor with a borehole sensor at ~240 m depth (see
+[Station network](#station-network)). The tool defaults to the original
+site (`DZA11`/`DZA13`) but any site or combination can be selected with
+`--sites`, and a new `map` action prints/plots station locations.
 
 It is plain, auditable scientific tooling, not a black box: standard FDSN
 retrieval via [ObsPy](https://docs.obspy.org/), standard instrument-response
@@ -12,6 +18,7 @@ removal and bandpass filtering, and a transparent "resample the timebase"
 audification method — no proprietary DSP, no hidden steps.
 
 **Author:** Victor Mazon, July 2026
+**Scientific Support:** Mike Lindner
 **License:** GNU General Public License v3.0 (see [LICENSE](LICENSE))
 
 ---
@@ -23,7 +30,7 @@ which can also be run on its own against a previously saved file:
 
 ```mermaid
 flowchart LR
-    A["FDSN web service<br/>ws.gpi.kit.edu<br/>KB.DZA11 + KB.DZA13, HH*<br/>6 traces @ 100 Hz"] --> B["fetch<br/>remove_response -&gt; detrend -&gt; bandpass 0.5-10 Hz -&gt; taper"]
+    A["FDSN web service<br/>ws.gpi.kit.edu<br/>KB.DZA11 + KB.DZA13 (default site), HH*<br/>6 traces @ 100 Hz"] --> B["fetch<br/>remove_response -&gt; detrend -&gt; bandpass freqmin-freqmax -&gt; taper"]
     B --> C[(".mseed")]
     C --> D["plot<br/>spectrogram (Z) + per-channel waveform panels"]
     C --> E["sonify<br/>pick 1 or all channels<br/>resample timebase x speed-up"]
@@ -31,6 +38,10 @@ flowchart LR
     E --> G([".wav"])
     G --> H(["play"])
 ```
+
+(Diagram shows the default single-site case; `--sites` can add more
+stations to the same pipeline, and `--freqmin`/`--freqmax` override the
+default 0.5–10 Hz bandpass, e.g. for the [ULF band](#ultra-low-frequency-ulf-research-band).)
 
 **Conceptually** — sonification here is nothing more than a frequency
 shift: the same samples are kept, only the clock they're played back at
@@ -42,25 +53,36 @@ flowchart LR
 ```
 
 **Example output** — the `plot` action for a real 24h `--days-back` fetch:
-a spectrogram of the vertical channel on top, and one waveform panel per
-trace below (all 6 available channels):
+a spectrogram of the vertical channel on top (with the applied bandpass
+marked directly on it) and one labeled waveform panel per trace below
+(all 6 available channels, each tagged with its depth and sensor model),
+with the x-axis automatically scaled to the recording's actual duration
+(here, 0-24 hours — matching how long the sonification of the same data
+lasts before any `--speed-up`). The right-hand side shows exactly where
+in Germany the site is and how deep each sensor sits below ground, so the
+whole figure is self-explanatory without cross-referencing the README:
 
-![Example spectrogram and waveform plot of a 24h DZA01 recording](docs/images/example_plot.png)
+![Example spectrogram, waveform, station map, and sensor-depth plot of a 24h DZA01 recording](docs/images/example_plot.png)
 
 ---
 
 ## Table of contents
 
 - [What it does](#what-it-does)
+- [Station network](#station-network)
+- [Sensor differences and recommended filter band](#sensor-differences-and-recommended-filter-band)
+- [Ultra-low-frequency (ULF) research band](#ultra-low-frequency-ulf-research-band)
 - [How it works](#how-it-works)
   - [1. Fetch](#1-fetch)
   - [2. Plot](#2-plot)
   - [3. Sonify](#3-sonify)
   - [4. Play](#4-play)
+  - [5. Map](#5-map)
 - [Installation](#installation)
 - [Quick start](#quick-start)
 - [Command-line reference](#command-line-reference)
 - [Recipes](#recipes)
+- [Sharing a full sonification batch with a collaborator](#sharing-a-full-sonification-batch-with-a-collaborator)
 - [Understanding `--listen-minutes`](#understanding---listen-minutes)
 - [Understanding `--hours-back` and `--days-back`](#understanding---hours-back-and---days-back)
 - [Understanding the multi-channel output](#understanding-the-multi-channel-output)
@@ -84,9 +106,95 @@ be combined freely on the command line:
 | `plot`   | Renders a dark, pyTREMOR-inspired figure: a spectrogram of the vertical channel on top, and one colored waveform-with-envelope panel per channel below. Saved as `.png`. |
 | `sonify` | Speeds up one channel's waveform so it becomes audible, and writes it out as a `.wav` file. |
 | `play`   | Plays a `.wav` file straight from the terminal (Windows/macOS/Linux). |
+| `map`    | Prints coordinates/depth/status for the selected site(s) and saves a station map plot (self-contained Matplotlib rendering, no `cartopy`/internet required). Does not fetch waveform data. |
 
 By default, running the script with no arguments does `fetch plot sonify`
-on a fresh 15-minute window of data.
+on a fresh 15-minute window of data for the default site (`DZA11`/`DZA13`).
+Use `--sites` to select a different site or combination of sites (see
+[Station network](#station-network)).
+
+## Station network
+
+The DZA network is a set of numbered **sites**; each site pairs a surface
+broadband sensor (`DZAx1`, at the surface, ~0 m depth) with a borehole
+sensor (`DZAx3`, at ~240 m depth ± a few meters) at the same location.
+`--sites` selects one or more site numbers (comma-separated), or the
+keywords `active` (every currently-streaming site) / `all` (every known
+site, including ones not yet installed — they're simply omitted from the
+result rather than causing an error).
+
+| Site | Stations | Status | Location (lat, lon, elevation) | Notes |
+|---|---|---|---|---|
+| 1 | `DZA11` (surface), `DZA13` (borehole) | **active** | 51.32358, 14.24694, 134.6 m | Streaming continuously since project start. Default site if `--sites` is not given. |
+| 3 | `DZA31` (surface), `DZA33` (borehole) | **active** | 51.24889, 14.15348, 211.5 m | Streaming, but may be less stable than site 1: solar-powered in a forest region with limited light. |
+| 4 | `DZA41` (surface), `DZA43` (borehole) | planned | — | Expected to be installed around mid-to-end of September 2026 (hard to pinpoint exactly). |
+| 6 | `DZA61` (surface), `DZA63` (borehole) | planned | — | Expected to be installed around mid-to-end of September 2026 (hard to pinpoint exactly). |
+
+Run `python DZA01.py map` (or `--sites 1,3 map`, etc.) to print this same
+information live from the FDSN service (plus the great-circle distance
+between sites) and save a plotted map + depth cross-section of the selected
+sites to `datasets/maps/station_map.png`. Both are rendered directly with
+Matplotlib (no extra dependencies, no `cartopy`/internet-tile requirement) —
+the map draws a simplified Germany outline (bundled as
+[assets/germany_outline.json](assets/germany_outline.json), so it works
+fully offline) with one marker per site, and the depth panel shows the
+surface vs. borehole sensor depth for each site side by side. Site markers
+use bold, thick-outlined dots (sized for visibility even when two sites are
+only ~10 km apart at whole-country zoom) and are colored consistently
+across the map, the depth panel, and every waveform panel's label border in
+`plot`, so a given site is the same color everywhere. The same two
+panels are also embedded automatically on the right-hand side of every
+`plot` output (see [Example output](#example-output) above), scoped to only
+the site(s) actually present in that recording — no separate `map` run
+needed just to know where the data came from.
+
+![Example station map for the two currently-active DZA sites](docs/images/station_map.png)
+
+## Sensor differences and recommended filter band
+
+Not all surface sensors in the network are the same model, which affects
+how reliable low-frequency (long-period) signals are at each station:
+
+- **`DZA11`** uses a **Trillium Compact 20s** (20-second eigenperiod).
+- **All other surface stations** (`DZA31`, `DZA41`, `DZA61`, ...) use a
+  **Trillium Horizon 120s** (120-second eigenperiod).
+
+In practice: amplitudes of signals with periods **below 20s** (i.e. above
+0.05 Hz) are less reliable at `DZA11` than at the 120s stations for
+small/weak signals — though `DZA11` is perfectly usable for most
+applications, including ocean microseism and strong teleseismic events.
+It may be less reliable for weak atmospheric-noise-band signals. **Signals
+with periods above 20s are reliable at all stations.** The default
+bandpass (`--freqmin 0.5 --freqmax 10.0`, i.e. periods of 0.1–2s) is well
+within the reliable range of every station in the network regardless of
+sensor model.
+
+## Ultra-low-frequency (ULF) research band
+
+The borehole stations are also used for ongoing research into the
+**sub-10 mHz band** (periods longer than ~100s) at the
+[Black Forest Observatory (BFO)](https://www.bfo-fr.de/), including a new
+PhD project — see the related
+[publication](https://publikationen.bibliothek.kit.edu/1000140172) for
+background. This is a fundamentally different regime from normal
+seismology: it overlaps with tidal, atmospheric-pressure, and
+gravitational-wave-adjacent signal research.
+
+`--freqmin`/`--freqmax` expose this band to the tool, e.g.:
+
+```bash
+# ULF band (<10 mHz), sped up 20000x, over a 10-day window
+python DZA01.py --days-back 10 --freqmin 0.0001 --freqmax 0.01 --speed-up 20000 fetch plot sonify
+```
+
+**Caution:** instrument-response removal becomes scientifically
+unreliable below a sensor's corner frequency — roughly **0.0083 Hz**
+(1/120s) for the Trillium Horizon 120s stations, or **0.05 Hz** (1/20s)
+for `DZA11`'s Trillium Compact 20s. The script prints a warning (not a
+hard block) when `--freqmin` is set below that threshold, since deliberate
+exploration below it may still be scientifically or artistically useful —
+just treat results in that regime as exploratory rather than validated
+without further review from a domain expert.
 
 ## How it works
 
@@ -96,10 +204,13 @@ on a fresh 15-minute window of data.
 web service (`http://ws.gpi.kit.edu`) for exactly one time window:
 
 - **Network:** `KB`
-- **Station:** `DZA1*` — a wildcard matching **two** physical
-  sub-stations, `DZA11` and `DZA13`, each with 3 component channels, so a
-  single fetch returns **6 traces**, all sampled at 100 Hz (see
-  [Understanding the multi-channel output](#understanding-the-multi-channel-output)).
+- **Station:** determined by `--sites` (default: site 1, i.e. `DZA11,DZA13`).
+  Each selected site contributes its surface and borehole stations, each
+  with 3 component channels — so a single-site fetch returns **6
+  traces**, and each additional site adds up to 6 more, all sampled at
+  100 Hz (see
+  [Understanding the multi-channel output](#understanding-the-multi-channel-output)
+  and [Station network](#station-network)).
 - **Channel:** `HH*` — high-broadband, high-gain seismometer channels.
 - **Window length:** `--duration` minutes (default 15), or `--hours-back`
   hours, or a full day per file in `--days-back` batch mode — see
@@ -126,9 +237,11 @@ Once data is retrieved, the standard ObsPy processing chain is applied:
 2. `detrend("demean")` + `detrend("linear")` — remove DC offset and linear
    drift.
 3. `filter("bandpass", freqmin=0.5, freqmax=10.0, corners=4)` — a 4-pole
-   Butterworth bandpass between 0.5–10 Hz, a typical seismological band
-   that excludes very-long-period drift and high-frequency instrument
-   noise.
+   Butterworth bandpass, `0.5–10 Hz` by default (overridable with
+   `--freqmin`/`--freqmax`, e.g. for the
+   [ULF research band](#ultra-low-frequency-ulf-research-band)). The
+   default excludes very-long-period drift and high-frequency instrument
+   noise for typical seismological work.
 4. `taper(0.125)` — a cosine taper on both ends to avoid edge artifacts
    from the filter.
 
@@ -137,15 +250,63 @@ waveform exchange format, under `datasets/mseed/`.
 
 ### 2. Plot
 
-`do_plot()` renders a single dark-themed figure per `.mseed` file:
+`do_plot()` renders a single dark-themed figure per `.mseed` file, designed to be
+read "at a glance" for scientific work — every relevant piece of context the
+tool knows is shown directly on the figure rather than hidden in the terminal:
 
+- **Title:** network, station codes, exact UTC time range plus the
+  equivalent **German civil local time (CET/CEST)**, and the bandpass
+  actually applied (`freqmin`–`freqmax`), read back from the `.json` metadata
+  sidecar written next to the `.mseed` file at fetch time (falls back to the
+  tool's 0.5–10 Hz default for older files saved before this existed). Local
+  time is computed with a manual EU-DST rule (last Sunday of March/October) —
+  no `zoneinfo`/`tzdata` dependency needed.
 - **Top panel:** a spectrogram (`scipy.signal.spectrogram`, `inferno`
-  colormap) of the vertical (`*Z`) channel, in dB, clipped to the 5th–99.5th
-  percentile for contrast.
+  colormap) of the vertical (`*Z`) channel with the most complete data
+  available (see below), in dB, clipped to the 5th–99.5th percentile for
+  contrast, with **dashed reference lines at `freqmin` and `freqmax`**, plus
+  a **solid green line marking the dominant frequency** (highest
+  average power across the whole window), so both the applied passband and
+  the actual loudest band are visible at a glance.
 - **One panel per trace below:** the raw waveform in a component-specific
-  color (cyan for Z, orange for N/1, red/pink for E/2), with a translucent
-  2-second rolling RMS envelope fill behind it, and a small monospace label
-  showing the trace ID.
+  color (cyan for Z, orange for N/1, red/pink for E/2), **shaded brighter
+  for surface sensors and darker for borehole sensors** (same hue, HLS
+  lightness adjusted via `colorsys`) so depth is visually encoded in the
+  waveform color itself, not just the text label. A translucent 2-second
+  rolling RMS envelope fill sits behind it, and each label's border is
+  colored to match that trace's site marker on the map/depth panels (see
+  below), so a viewer can trace "this waveform ↔ this map dot ↔ this depth
+  column" by color alone. The label itself shows the trace ID, **sampling
+  rate**, **depth (surface/borehole) and, for surface sensors, the sensor
+  model and eigenperiod**, the **channel orientation (azimuth/dip)** read
+  from the station inventory at fetch time (when available), and the
+  **peak amplitude and RMS level** for that trace (in m/s, computed from
+  the full-resolution data) — so which physical sensor produced each panel,
+  how it's oriented, and how strong the signal was is always clear without
+  cross-referencing the README.
+- **One shared, absolute time axis for every panel** (spectrogram +
+  all waveforms), instead of each panel auto-zooming to its own data. Near-
+  real-time fetches routinely have channels with slightly different data
+  latency/availability; rather than silently stretching a shorter trace to
+  fill its panel (which is what previously made the spectrogram look
+  "unfinished" — its channel simply had less data than the others), any
+  trace covering less than 99% of the full window now visibly stops early/
+  late in the *right place*, and its label gains a note like
+  `63% of window (ends 67s early)` so the gap is impossible to miss or
+  misread as a plotting bug.
+- **Time axis scaled to the actual recording length:** seconds, minutes,
+  or hours are picked automatically (e.g. a 10h fetch shows a 0–10
+  "Time (hours)" axis) so the plot always reads at the same real-world
+  duration as the sonification made from the same file (before any
+  `--speed-up`).
+- **Right-hand side:** the same station-location map and sensor-depth
+  cross-section produced by the `map` action (see [below](#5-map)), scoped
+  automatically to just the site(s) present in this particular recording —
+  so the figure never needs a separate `map` run to know *where* the data
+  came from or *how deep* each sensor sits. When more than one site is
+  shown, the depth panel's x-axis labels also note the **distance to the
+  nearest other active site** (great-circle, via the same `haversine_km`
+  helper used by `map`), e.g. `Site 1 (10.5 km to Site 3)`.
 
 For long recordings, waveform panels are downsampled (capped at ~200,000
 rendered points per trace) purely for plotting speed/memory — this only
@@ -181,6 +342,32 @@ output_duration = input_duration / speed_up_factor
 `afplay` on macOS, and `paplay`/`aplay`/`ffplay` (whichever is found) on
 Linux.
 
+### 5. Map
+
+`do_map()` queries station metadata (not waveform data) for the selected
+sites over a wide, fixed time range, so planned-but-not-yet-installed
+stations simply don't appear rather than causing an error. For each
+station found, it prints the code, depth (surface/borehole), sensor model
+(for surface stations), coordinates, elevation, and site status/notes; if
+more than one site is selected, it also prints the great-circle distance
+between every pair of sites. It then renders two panels with Matplotlib and
+saves them to `datasets/maps/station_map.png`:
+
+- **Station location map:** a simplified Germany national border (bundled
+  as [assets/germany_outline.json](assets/germany_outline.json), a small
+  local asset — no `cartopy`, no internet map tiles, works fully offline)
+  with one colored, numbered marker per site (surface and borehole sensors
+  share the same coordinates, so they're combined into a single point),
+  plus a legend box with the full station details for each site.
+- **Sensor depth cross-section:** one column per site showing the surface
+  sensor at 0 m and the borehole sensor at ~240 m, connected by a dotted
+  line, so the vertical separation between the two sensor types is obvious
+  at a glance.
+
+This uses only the dependencies already in `requirements.txt`; no `cartopy`
+or internet access is required at plot time. See
+[Station network](#station-network) for an example of the printed output.
+
 ## Installation
 
 Requires Python 3.9+.
@@ -190,7 +377,9 @@ pip install -r requirements.txt
 ```
 
 Dependencies: [ObsPy](https://docs.obspy.org/) (FDSN client + seismological
-processing), NumPy, SciPy (spectrogram + WAV I/O), Matplotlib (plotting).
+processing), NumPy, SciPy (spectrogram + WAV I/O), Matplotlib (plotting,
+including the `map` action's station-location plot — no extra/optional
+dependencies needed).
 
 ## Quick start
 
@@ -220,7 +409,14 @@ python DZA01.py [actions ...] [options]
 - `plot` — render the styled plot
 - `sonify` — produce the `.wav`
 - `play` — play a `.wav`
+- `map` — print/plot station locations for the selected site(s) (no waveform data fetched)
 - `all` — shorthand for `fetch plot sonify`
+
+**Station selection:**
+
+| Option | Default | Description |
+|---|---|---|
+| `--sites SITES` | site `1` (`active` sites for `map`) | Comma-separated site number(s) (e.g. `1` or `1,3`), or `active` (all currently-streaming sites), or `all` (every known site, including not-yet-installed ones). See [Station network](#station-network). |
 
 **Fetch options:**
 
@@ -232,6 +428,8 @@ python DZA01.py [actions ...] [options]
 | `--latency MIN` | `2` | How far back from "now" to end the window. Smaller = closer to real time, but the server may not have the data yet. |
 | `--max-latency MIN` | `60` | Ceiling the script backs off to if `--latency` is too aggressive. |
 | `--latency-step MIN` | `2` | How much to increase latency per retry when backing off. |
+| `--freqmin HZ` | `0.5` | Lower bandpass corner. Lower this for long-period work, e.g. the [ULF research band](#ultra-low-frequency-ulf-research-band) (`--freqmin 0.0001`). |
+| `--freqmax HZ` | `10.0` | Upper bandpass corner. |
 
 **Sonify options:**
 
@@ -274,7 +472,35 @@ python DZA01.py --pick 0 sonify --channel all
 
 # Build a 10-day dataset of 24h files (fetch + plot + sonify each day, no play)
 python DZA01.py --days-back 10 --speed-up 100 fetch plot sonify
+
+# Print/plot station locations for the two active sites
+python DZA01.py --sites 1,3 map
+
+# Fetch two sites together instead of just the default one
+python DZA01.py --sites 1,3 fetch plot sonify
+
+# Ultra-low-frequency (ULF) band (<10 mHz) over a 10-day window, sped up a lot
+python DZA01.py --days-back 10 --freqmin 0.0001 --freqmax 0.01 --speed-up 20000 fetch plot sonify
+
+# Full "every possible sound source" batch: both active sites, every channel,
+# one combined plot + one .wav per channel -- see docs/sonification_batch_2026-07-27.md
+# for a worked example index of exactly this command's output, ready to share
+# with a collaborating scientist.
+python DZA01.py --sites 1,3 --hours-back 24 --speed-up 100 --channel all fetch plot sonify
 ```
+
+## Sharing a full sonification batch with a collaborator
+
+[`docs/sonification_batch_2026-07-27.md`](docs/sonification_batch_2026-07-27.md)
+is a worked example of preparing every currently possible "sound source" (all
+channels, both active sites, one 24h window) as a single deliverable: the
+combined plot, the raw `.mseed`, and one `.wav` per channel, with a table
+explaining what each file is (site, depth, sensor model, orientation,
+duration, and any data-coverage caveats) plus a few suggested comparisons
+(surface vs. borehole, sensor model differences, component orientation).
+Regenerate it any time with the command shown in that file, swapping
+`--sites 1,3` for `--sites all` once more sites are installed.
+
 
 ## Understanding `--listen-minutes`
 
@@ -335,22 +561,23 @@ python DZA01.py --days-back 10 --speed-up 100 fetch plot sonify
 
 ## Understanding the multi-channel output
 
-The station pattern `DZA1*` is a wildcard that matches **two** physical
-sub-stations at the same site — `DZA11` and `DZA13` — each recording
-**three** components (a vertical `Z` and two horizontals, named `N`/`E`
-or `1`/`2` depending on the sub-station). That means **every fetch
-returns 6 traces**, all at 100 Hz:
+Each selected site contributes **two** physical sub-stations — a surface
+station (e.g. `DZA11`) and a borehole station (e.g. `DZA13`) — each
+recording **three** components (a vertical `Z` and two horizontals, named
+`N`/`E` or `1`/`2` depending on the sub-station). That means **every site
+adds 6 traces**, all at 100 Hz. The default (`--sites 1`, i.e. `DZA1*`)
+returns 6 traces; `--sites 1,3` returns 12; and so on:
 
 ```
 KB.DZA11.00.HHZ   KB.DZA11.00.HHN   KB.DZA11.00.HHE
 KB.DZA13.00.HHZ   KB.DZA13.00.HH1   KB.DZA13.00.HH2
 ```
 
-`plot` shows **all six**. `sonify` only ever turns **one** trace into
-audio at a time (audio is inherently single-channel here) — by default
-the first trace in the file, or whichever one matches `--channel`. The
-script always prints which channel it picked and which ones it's
-ignoring, so this is never silent/surprising:
+`plot` shows **every** trace in the file. `sonify` only ever turns **one**
+trace into audio at a time (audio is inherently single-channel here) — by
+default the first trace in the file, or whichever one matches
+`--channel`. The script always prints which channel it picked and which
+ones it's ignoring, so this is never silent/surprising:
 
 ```
 [sonify] 6 channels available; using 'KB.DZA11.00.HHZ'. Ignoring: KB.DZA11.00.HHN,
@@ -364,9 +591,10 @@ Created automatically next to the script on first run:
 
 ```
 datasets/
-├── mseed/           raw, processed waveform data (.mseed)
+├── mseed/           raw, processed waveform data (.mseed) + fetch metadata (.json)
 ├── plot/             spectrogram + waveform plots (.png)
-└── sonifications/    sonified audio (.wav)
+├── sonifications/    sonified audio (.wav)
+└── maps/             station map plots from the `map` action (.png)
 ```
 
 Saved data is not tracked in git (see `.gitignore`) — only the folder

@@ -4,13 +4,16 @@ __pycache__/
 
 # Generated data (large binary outputs, regenerate with the script)
 datasets/mseed/*.mseed
+datasets/mseed/*.json
 datasets/sonifications/*.wav
 datasets/plot/*.png
+datasets/maps/*.png
 
 # Keep the folder structure in git even though contents are ignored
 !datasets/mseed/.gitkeep
 !datasets/sonifications/.gitkeep
 !datasets/plot/.gitkeep
+!datasets/maps/.gitkeep
 
 # OS / editor cruft
 .DS_Store
