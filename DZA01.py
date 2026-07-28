@@ -468,7 +468,18 @@ def _process_and_save(st, inv, starttime, prefix="fetch", file_prefix="DZA1",
     st.detrend("demean")
     st.detrend("linear")
     st.filter("bandpass", freqmin=freqmin, freqmax=freqmax, corners=4)
-    st.taper(0.125)
+    # max_percentage=0.125 means 12.5% of *each individual trace* is faded in/out --
+    # a non-issue for a full ~24h recording (the fade is spread over hours and
+    # never noticed), but ObsPy splits a channel with a mid-recording gap into
+    # multiple separate Trace objects, each tapered independently on *its own*
+    # length. For a short segment (e.g. the last few minutes before/after a gap),
+    # 12.5% each side is 25% of the *entire* short clip spent fading in/out --
+    # audibly "broken"/weak once sonified and sped up, even though the underlying
+    # data is fine. max_length caps the taper to a fixed real-world duration so
+    # short segments aren't disproportionately affected, while long recordings
+    # (where 12.5% is already far more than this cap) are unaffected.
+    st.taper(0.125, max_length=20.0)
+
 
     timestamp = starttime.strftime("%Y-%m-%d-%H-%M")
     mseed_path = os.path.join(MSEED_DIR, f"{file_prefix}_{timestamp}.mseed")
