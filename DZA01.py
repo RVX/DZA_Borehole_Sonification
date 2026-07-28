@@ -1405,15 +1405,28 @@ def main():
         )
         if not mseed_paths:
             raise SystemExit("Batch fetch produced no files (no data available for any requested day).")
+        failures = []
         for i, path in enumerate(mseed_paths):
             print(f"[batch] Processing file {i + 1}/{len(mseed_paths)}: {os.path.basename(path)}")
-            if "plot" in actions:
-                do_plot(path)
-            if "sonify" in actions:
-                do_sonify(path, effective_speed_up, args.channel)
+            # One bad file (corrupt data, an all-gap channel, etc.) shouldn't cost the
+            # rest of a multi-day batch its plot/sonify output -- log it and move on,
+            # rather than letting an unhandled exception here abort every remaining day.
+            try:
+                if "plot" in actions:
+                    do_plot(path)
+                if "sonify" in actions:
+                    do_sonify(path, effective_speed_up, args.channel)
+            except (SystemExit, Exception) as exc:
+                print(f"[batch] Warning: failed to process {os.path.basename(path)} ({exc}); "
+                      f"skipping to next file.", file=sys.stderr)
+                failures.append(path)
         if "play" in actions:
             print("[batch] 'play' is skipped in --days-back batch mode (too many files to auto-play).")
-        print(f"[batch] Done: {len(mseed_paths)} day(s) fetched and processed.")
+        ok_count = len(mseed_paths) - len(failures)
+        print(f"[batch] Done: {ok_count}/{len(mseed_paths)} day(s) fetched and processed successfully.")
+        if failures:
+            print(f"[batch] {len(failures)} file(s) failed to plot/sonify: "
+                  f"{', '.join(os.path.basename(p) for p in failures)}", file=sys.stderr)
         return
 
     if args.hours_back is not None and fetch_needed:
