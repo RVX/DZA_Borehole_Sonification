@@ -955,16 +955,26 @@ def do_plot(mseed_path):
     )
     time_divisor, time_label, time_unit_word = _pick_time_axis_unit(duration_s)
 
-    fig = plt.figure(figsize=(17, max(6.5, 3 + 1.3 * n_traces)), facecolor=BG_COLOR)
-    outer = fig.add_gridspec(1, 2, width_ratios=[2.5, 1], wspace=0.24)
-    left_gs = outer[0].subgridspec(1 + n_traces, 1, height_ratios=[2.2] + [1] * n_traces, hspace=0.15)
-    right_gs = outer[1].subgridspec(2, 1, height_ratios=[1.15, 1], hspace=0.45)
+    # Right column (map + depth scale) is given a much larger share of the figure
+    # width/height than before -- there was spare whitespace around the map at the
+    # old ratio -- and the per-trace metadata labels move above each waveform's
+    # axes (see below), so the taller hspace here is what gives them room without
+    # covering any plotted data.
+    fig = plt.figure(figsize=(19.5, max(7.5, 3 + 1.75 * n_traces)), facecolor=BG_COLOR)
+    outer = fig.add_gridspec(1, 2, width_ratios=[2.0, 1.3], wspace=0.2)
+    left_gs = outer[0].subgridspec(1 + n_traces, 1, height_ratios=[2.2] + [1] * n_traces, hspace=0.7)
+    # The map keeps a fixed real-world aspect ratio (locked to latitude), so once it's
+    # as wide as its column allows it can't get any taller -- allocating it more height
+    # than that just leaves dead space. Give it only what it can actually use and let
+    # the depth-scale panel (which has no aspect lock, so it fills whatever it's given)
+    # take the rest.
+    right_gs = outer[1].subgridspec(2, 1, height_ratios=[1.0, 1.4], hspace=0.4)
 
     # -- right column: station location map (Germany context) + sensor depth scale --
     map_ax = fig.add_subplot(right_gs[0])
     depth_ax = fig.add_subplot(right_gs[1])
     draw_station_map(map_ax, map_site_points, germany_outline=germany_outline,
-                      title="Station location", marker_size=140)
+                      title="Station location", marker_size=170)
     draw_depth_scale(depth_ax, depth_site_points)
 
     # -- top-left panel: spectrogram of the primary (vertical) channel --
@@ -1052,16 +1062,20 @@ def do_plot(mseed_path):
         else:
             site_line = None
 
-        label_lines = [f"{tr.id}  |  {tr.stats.sampling_rate:.0f} Hz"]
+        # Metadata sits *above* this trace's own axes (outside the plotted data
+        # area, in the gap created by left_gs's hspace) rather than as a box drawn
+        # on top of the waveform -- so a full-amplitude trace is never hidden
+        # behind its own label. Everything is kept to one line where it fits; a
+        # second line is only added when there's too much to say to stay readable.
+        line1_bits = [f"{tr.id}", f"{tr.stats.sampling_rate:.0f} Hz"]
         if site_line:
-            label_lines.append(site_line)
-
+            line1_bits.append(site_line)
         orientation = channel_orientations.get(tr.id)
         if orientation and orientation.get("azimuth") is not None and orientation.get("dip") is not None:
-            label_lines.append(f"az {orientation['azimuth']:.0f}\u00b0, dip {orientation['dip']:.0f}\u00b0")
+            line1_bits.append(f"az {orientation['azimuth']:.0f}\u00b0, dip {orientation['dip']:.0f}\u00b0")
+        line1 = "  |  ".join(line1_bits)
 
-        label_lines.append(f"peak {peak_amp:.2e} m/s | rms {rms_amp:.2e} m/s")
-
+        line2_bits = [f"peak {peak_amp:.2e} m/s", f"rms {rms_amp:.2e} m/s"]
         coverage_pct = 100 * trace_duration_s / duration_s
         if coverage_pct < 99:
             end_gap_s = duration_s - (offset_s + trace_duration_s)
@@ -1071,14 +1085,18 @@ def do_plot(mseed_path):
             if end_gap_s > max(1.0, duration_s * 0.01):
                 gap_bits.append(f"ends {end_gap_s:.0f}s early")
             gap_note = ", ".join(gap_bits) or "partial data"
-            label_lines.append(f"{coverage_pct:.0f}% of window ({gap_note})")
-        label_text = "\n".join(label_lines)
+            line2_bits.append(f"{coverage_pct:.0f}% of window ({gap_note})")
+        line2 = "  |  ".join(line2_bits)
 
+        label_text = f"{line1}\n{line2}"
+
+        # y sits well above 1.0 (axes top) so the label clears matplotlib's own
+        # automatic "1eN" scale-offset text, which is drawn just above the top
+        # spine at the same left-hand corner and would otherwise overlap it.
         accent_color = site_color_map.get(info["site"]) if info else GRID_COLOR
         ax.text(
-            0.005, 0.92, label_text, transform=ax.transAxes, color="white", fontsize=8,
-            family="monospace", va="top",
-            bbox=dict(boxstyle="round", facecolor="#1c1f26", edgecolor=accent_color, linewidth=1.6, alpha=0.88),
+            0.0, 1.22, label_text, transform=ax.transAxes, color=accent_color, fontsize=7.8,
+            family="monospace", va="bottom", ha="left", linespacing=1.4,
         )
         style_axes(ax)
         if i < n_traces - 1:

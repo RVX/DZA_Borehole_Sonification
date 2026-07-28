@@ -483,16 +483,17 @@ python DZA01.py --sites 1,3 fetch plot sonify
 python DZA01.py --days-back 10 --freqmin 0.0001 --freqmax 0.01 --speed-up 20000 fetch plot sonify
 
 # Full "every possible sound source" batch: both active sites, every channel,
-# one combined plot + one .wav per channel -- see docs/sonification_batch_2026-07-27.md
-# for a worked example index of exactly this command's output, ready to share
-# with a collaborating scientist.
+# one combined plot + one .wav per channel -- see docs/sonification_batch_2026-07-28.md
+# for the latest worked example index of exactly this command's output, ready
+# to share with a collaborating scientist.
 python DZA01.py --sites 1,3 --hours-back 24 --speed-up 100 --channel all fetch plot sonify
 ```
 
 ## Sharing a full sonification batch with a collaborator
 
-[`docs/sonification_batch_2026-07-27.md`](docs/sonification_batch_2026-07-27.md)
-is a worked example of preparing every currently possible "sound source" (all
+[`docs/sonification_batch_2026-07-28.md`](docs/sonification_batch_2026-07-28.md)
+(and the earlier [2026-07-27 run](docs/sonification_batch_2026-07-27.md)) are
+worked examples of preparing every currently possible "sound source" (all
 channels, both active sites, one 24h window) as a single deliverable: the
 combined plot, the raw `.mseed`, and one `.wav` per channel, with a table
 explaining what each file is (site, depth, sensor model, orientation,
