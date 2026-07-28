@@ -492,8 +492,7 @@ python DZA01.py --sites 1,3 --hours-back 24 --speed-up 100 --channel all fetch p
 ## Sharing a full sonification batch with a collaborator
 
 [`docs/sonification_batch_2026-07-28.md`](docs/sonification_batch_2026-07-28.md)
-(and the earlier [2026-07-27 run](docs/sonification_batch_2026-07-27.md)) are
-worked examples of preparing every currently possible "sound source" (all
+is a worked example of preparing every currently possible "sound source" (all
 channels, both active sites, one 24h window) as a single deliverable: the
 combined plot, the raw `.mseed`, and one `.wav` per channel, with a table
 explaining what each file is (site, depth, sensor model, orientation,
