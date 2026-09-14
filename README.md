@@ -20,11 +20,13 @@ audification method — no proprietary DSP, no hidden steps.
 This repository also includes a second, standalone script,
 [`sonifimeteor.py`](#meteor-event-sonification-sonifimeteorpy), built around
 one specific real dataset: a multi-station recording of a meteoroid
-atmospheric entry, contributed by an external collaborating scientist.
+atmospheric entry, generously contributed by scientist Dario Eickhoff.
 
 **Author:** Víctor Mazón Gardoqui, July 2026
 
-**Scientific Support:** Mike Lindner
+**Scientific Support:** Mike Lindner, whose guidance as scientific supervisor across the whole
+project — from the very first fetch to the last plot — has been invaluable over these many
+months of work.
 
 **License:** GNU General Public License v3.0 (see [LICENSE](LICENSE))
 
@@ -98,6 +100,7 @@ whole figure is self-explanatory without cross-referencing the README:
 - [Data source and limitations](#data-source-and-limitations)
 - [Known limitations / things to be aware of](#known-limitations--things-to-be-aware-of)
 - [Meteor event sonification (`sonifimeteor.py`)](#meteor-event-sonification-sonifimeteorpy)
+- [Acknowledgments](#acknowledgments)
 - [Contributing](#contributing)
 - [Citation](#citation)
 - [License](#license)
@@ -721,8 +724,8 @@ stations spanning several national/regional European networks.
 
 ### Data source
 
-The source `.mseed` file lives in `datasets/meteor_source/`, contributed
-by an external collaborating scientist. It has instrument response
+The source `.mseed` file lives in `datasets/meteor_source/`, generously
+contributed by scientist Dario Eickhoff. It has instrument response
 already removed, and each of its 99 traces is individually cut tight
 around that station's own arrival (~1 min before, ~4 min after) — so
 absolute start times genuinely differ station to station, encoding real
@@ -793,6 +796,24 @@ real event, and the generated audio is the curated deliverable for it.
   its real ~11-minute span, compressed to under 34 seconds at 20x.
 - A `plot` action that renders the same wavefront sweep as a picture, so
   the network-wide event can be seen as well as heard.
+
+## Acknowledgments
+
+This project would not exist in its current form without the generous
+support of two people over these many months of work:
+
+- **Mike Lindner** — scientific supervisor for the project as a whole,
+  whose guidance shaped it from the very first fetch to the last plot.
+  His steady, invaluable support throughout has been essential to
+  getting this right.
+- **Dario Eickhoff** — the scientist who generously provided the raw
+  multi-station waveform recording of the meteoroid atmospheric entry
+  that [`sonifimeteor.py`](#meteor-event-sonification-sonifimeteorpy) is
+  built around. Without his real, carefully-prepared dataset, the
+  meteor sonification and its network-wide sweep across 33 stations
+  simply would not have been possible.
+
+Heartfelt thanks to both for their time and expertise.
 
 ## Contributing
 
