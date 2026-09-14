@@ -22,11 +22,10 @@ This repository also includes a second, standalone script,
 one specific real dataset: a multi-station recording of a meteoroid
 atmospheric entry, generously contributed by scientist Dario Eickhoff.
 
-**Author:** Víctor Mazón Gardoqui, July 2026
+**Author:** Víctor Mazón Gardoqui, July-September 2026
 
 **Scientific Support:** Mike Lindner, whose guidance as scientific supervisor across the whole
-project — from the very first fetch to the last plot — has been invaluable over these many
-months of work.
+project — from the very first fetch to the last plot — has been invaluable over these months of work.
 
 **License:** GNU General Public License v3.0 (see [LICENSE](LICENSE))
 
