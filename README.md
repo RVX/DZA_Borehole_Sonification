@@ -799,12 +799,12 @@ real event, and the generated audio is the curated deliverable for it.
 ## Acknowledgments
 
 This project would not exist in its current form without the generous
-support of two people over these many months of work:
+support of two scientist over these months of work:
 
 - **Mike Lindner** — scientific supervisor for the project as a whole,
   whose guidance shaped it from the very first fetch to the last plot.
-  His steady, invaluable support throughout has been essential to
-  getting this right.
+  His steady support throughout has been essential to
+  getting this accurate.
 - **Dario Eickhoff** — the scientist who generously provided the raw
   multi-station waveform recording of the meteoroid atmospheric entry
   that [`sonifimeteor.py`](#meteor-event-sonification-sonifimeteorpy) is
