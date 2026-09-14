@@ -2,6 +2,10 @@
 __pycache__/
 *.pyc
 
+# Local virtual environment (see README > Installation / Deployment)
+.venv/
+venv/
+
 # Generated data (large binary outputs, regenerate with the script)
 datasets/mseed/*.mseed
 datasets/mseed/*.json
@@ -14,6 +18,9 @@ datasets/maps/*.png
 !datasets/sonifications/.gitkeep
 !datasets/plot/.gitkeep
 !datasets/maps/.gitkeep
+
+# Too large for GitHub (>100MB) -- kept locally only, never tracked
+docs/Sonification.zip
 
 # OS / editor cruft
 .DS_Store

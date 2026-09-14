@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Template launchd agent for running DZA01.py unattended on a schedule.
+
+  Before use, replace every REPLACE_WITH_... placeholder below, then see
+  the README's "Deployment (macOS / unattended runs)" section for the
+  install/uninstall commands.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.rvx.dza01-sonify</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>REPLACE_WITH_REPO_PATH/deployment/run_dza01.sh</string>
+    </array>
+
+    <!-- Seconds between runs. 3600 = hourly; adjust to taste (e.g. 21600 = every 6h). -->
+    <key>StartInterval</key>
+    <integer>3600</integer>
+
+    <!-- Also run once immediately when the agent is loaded. -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>REPLACE_WITH_HOME/Library/Logs/dza01-sonify.log</string>
+    <key>StandardErrorPath</key>
+    <string>REPLACE_WITH_HOME/Library/Logs/dza01-sonify.log</string>
+</dict>
+</plist>

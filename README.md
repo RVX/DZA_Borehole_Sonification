@@ -86,6 +86,7 @@ whole figure is self-explanatory without cross-referencing the README:
   - [4. Play](#4-play)
   - [5. Map](#5-map)
 - [Installation](#installation)
+- [Deployment (macOS / unattended runs)](#deployment-macos--unattended-runs)
 - [Quick start](#quick-start)
 - [Command-line reference](#command-line-reference)
 - [Recipes](#recipes)
@@ -388,6 +389,56 @@ Dependencies: [ObsPy](https://docs.obspy.org/) (FDSN client + seismological
 processing), NumPy, SciPy (spectrogram + WAV I/O), Matplotlib (plotting,
 including the `map` action's station-location plot — no extra/optional
 dependencies needed).
+
+## Deployment (macOS / unattended runs)
+
+For running this unattended on a dedicated machine (e.g. a Mac mini),
+`deployment/` has a `launchd` template that repeats a `fetch plot sonify`
+cycle on a schedule, independent of any user being logged in.
+
+1. Clone the repo and set up a virtual environment:
+
+   ```bash
+   git clone https://github.com/RVX/DZA_Borehole_Sonification.git
+   cd DZA_Borehole_Sonification
+   python3 -m venv .venv
+   source .venv/bin/activate
+   pip install -r requirements.txt
+   ```
+
+2. Copy the plist and fill in its two `REPLACE_WITH_...` placeholders
+   (the absolute repo path, and your home folder for the log path):
+
+   ```bash
+   cp deployment/com.rvx.dza01-sonify.plist ~/Library/LaunchAgents/
+   # edit ~/Library/LaunchAgents/com.rvx.dza01-sonify.plist
+   ```
+
+3. Load it (starts immediately, then repeats every `StartInterval`
+   seconds — 1h by default, edit the plist to change it):
+
+   ```bash
+   launchctl load ~/Library/LaunchAgents/com.rvx.dza01-sonify.plist
+   ```
+
+4. Check on it:
+
+   ```bash
+   tail -f ~/Library/Logs/dza01-sonify.log
+   launchctl list | grep dza01-sonify
+   ```
+
+5. To stop/uninstall:
+
+   ```bash
+   launchctl unload ~/Library/LaunchAgents/com.rvx.dza01-sonify.plist
+   rm ~/Library/LaunchAgents/com.rvx.dza01-sonify.plist
+   ```
+
+`deployment/run_dza01.sh` is the actual command that runs each cycle —
+edit its `python3 DZA01.py ...` line to change the action list (e.g. add
+`play` to also hear each new piece), matching any of the combinations in
+the [command-line reference](#command-line-reference) below.
 
 ## Quick start
 
