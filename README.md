@@ -17,8 +17,10 @@ retrieval via [ObsPy](https://docs.obspy.org/), standard instrument-response
 removal and bandpass filtering, and a transparent "resample the timebase"
 audification method — no proprietary DSP, no hidden steps.
 
-**Author:** Victor Mazon, July 2026
+**Author:** Víctor Mazón Gardoqui, July 2026
+
 **Scientific Support:** Mike Lindner
+
 **License:** GNU General Public License v3.0 (see [LICENSE](LICENSE))
 
 ---

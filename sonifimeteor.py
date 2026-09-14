@@ -12,10 +12,12 @@ station (closer stations see the arrival sooner) and there's no single
 "primary" channel the way there is for a DZA single-station fetch.
 
 Runs standalone, independent of DZA01.py -- point it at any similarly-cut
-meteor .mseed file with --file. Output goes to
-datasets/sonifications_sonifimeteor/ (a separate folder from DZA01.py's
-datasets/sonifications/, so a meteor run and a normal DZA01.py run can be
-triggered side by side without colliding on filenames).
+meteor .mseed file with --file. Source data lives in
+datasets/meteor_source/ (mseed + Dario's check.py/check.png/meteor.mp4
+references); output goes to datasets/sonifications_sonifimeteor/ (a
+separate folder from DZA01.py's datasets/sonifications/, so a meteor run
+and a normal DZA01.py run can be triggered side by side without colliding
+on filenames).
 
 Examples
 --------
@@ -42,11 +44,11 @@ from scipy import signal
 from scipy.io import wavfile
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-METEOR_INPUT_DIR = os.path.join(BASE_DIR, "4_sonic")
+DATASETS_DIR = os.path.join(BASE_DIR, "datasets")
+METEOR_INPUT_DIR = os.path.join(DATASETS_DIR, "meteor_source")
 DEFAULT_METEOR_MSEED = os.path.join(
     METEOR_INPUT_DIR, "4_sonic_koblenz_waveforms_response_removed.mseed"
 )
-DATASETS_DIR = os.path.join(BASE_DIR, "datasets")
 SONIFIMETEOR_DIR = os.path.join(DATASETS_DIR, "sonifications_sonifimeteor")
 os.makedirs(SONIFIMETEOR_DIR, exist_ok=True)
 
