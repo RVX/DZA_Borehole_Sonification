@@ -59,6 +59,9 @@ SONIFIMETEOR_DIR = os.path.join(DATASETS_DIR, "sonifications_sonifimeteor")
 os.makedirs(SONIFIMETEOR_DIR, exist_ok=True)
 PLOT_SONIFIMETEOR_DIR = os.path.join(DATASETS_DIR, "plot_sonifimeteor")
 os.makedirs(PLOT_SONIFIMETEOR_DIR, exist_ok=True)
+ASSETS_DIR = os.path.join(BASE_DIR, "assets")
+GERMANY_OUTLINE_PATH = os.path.join(ASSETS_DIR, "germany_outline.json")
+NEIGHBOR_BORDERS_PATH = os.path.join(ASSETS_DIR, "meteor_neighbor_borders.json")
 
 # Same pyTREMOR-inspired dark theme as DZA01.py's plots, for visual consistency
 # across the two scripts (kept as separate constants here since this script is
@@ -354,6 +357,38 @@ def do_merge(st, mseed_path, station_filter, speed_up_factor, freqmin, freqmax, 
     return wav_path
 
 
+_region_borders_cache = None
+
+
+def _load_region_borders():
+    """Country border outlines drawn as background context on the map panel:
+    Germany's full outline (shared asset with DZA01.py) plus the immediate
+    neighbors this station network actually spans -- Belgium, Luxembourg, and
+    the Netherlands (full rings), and just the NE corner of France that
+    borders them (see assets/meteor_neighbor_borders.json). Each entry is
+    (name, [lon, lat] points, is_closed_ring)."""
+    global _region_borders_cache
+    if _region_borders_cache is not None:
+        return _region_borders_cache
+    borders = []
+    try:
+        with open(GERMANY_OUTLINE_PATH, encoding="utf-8") as f:
+            borders.append(("Germany", json.load(f)["coordinates"], True))
+    except OSError:
+        pass
+    try:
+        with open(NEIGHBOR_BORDERS_PATH, encoding="utf-8") as f:
+            neighbors = json.load(f)
+        borders.append(("Belgium", neighbors["belgium"], True))
+        borders.append(("Luxembourg", neighbors["luxembourg"], True))
+        borders.append(("Netherlands", neighbors["netherlands"], True))
+        borders.append(("France", neighbors["france_partial"], False))
+    except OSError:
+        pass
+    _region_borders_cache = borders
+    return borders
+
+
 def do_plot(st, mseed_path, station_filter, freqmin, freqmax, taper_max_length, use_pan):
     """Dark-themed, two-panel static picture of the same thing 'merge' turns into
     sound: a station map colored by real arrival time (a still analogue of
@@ -415,6 +450,14 @@ def do_plot(st, mseed_path, station_filter, freqmin, freqmax, taper_max_length, 
 
     # -- left panel: station map colored by real arrival time --
     map_ax.set_facecolor(BG_COLOR)
+    for name, points, is_closed in _load_region_borders():
+        border_lons = [p[0] for p in points]
+        border_lats = [p[1] for p in points]
+        if is_closed:
+            map_ax.fill(border_lons, border_lats, facecolor="#1c2530", edgecolor="#4a5a6a",
+                         linewidth=1.0, zorder=1)
+        else:
+            map_ax.plot(border_lons, border_lats, color="#4a5a6a", linewidth=1.0, zorder=1)
     if located:
         lons = [coords[(tr.stats.network, tr.stats.station)][1] for tr in located]
         lats = [coords[(tr.stats.network, tr.stats.station)][0] for tr in located]
@@ -429,6 +472,14 @@ def do_plot(st, mseed_path, station_filter, freqmin, freqmax, taper_max_length, 
         cbar.set_label("Arrival time after first station (s)", color=FG_COLOR, fontsize=8)
         cbar.ax.yaxis.set_tick_params(color=FG_COLOR)
         plt.setp(cbar.ax.get_yticklabels(), color=FG_COLOR, fontsize=7)
+        # Zoom to the station cluster (not the whole countries behind it), with a
+        # margin proportional to its spread. Aspect is left auto (not locked to
+        # true geographic scale) so the panel fills its full row instead of
+        # letterboxing -- at this regional scale the borders still read fine.
+        lon_margin = max(0.35, (max(lons) - min(lons)) * 0.2)
+        lat_margin = max(0.35, (max(lats) - min(lats)) * 0.2)
+        map_ax.set_xlim(min(lons) - lon_margin, max(lons) + lon_margin)
+        map_ax.set_ylim(min(lats) - lat_margin, max(lats) + lat_margin)
     else:
         map_ax.text(0.5, 0.5, "No public station coordinates resolved\n(try without --no-pan)",
                      color=FG_COLOR, fontsize=9, ha="center", va="center",
