@@ -359,6 +359,18 @@ def do_merge(st, mseed_path, station_filter, speed_up_factor, freqmin, freqmax, 
 
 _region_borders_cache = None
 
+# Each neighbor gets its own tint + a fixed label point (chosen to fall inside
+# the region actually covered by this station network) -- a single shared dark
+# fill made the countries blend into one indistinguishable blob, and without
+# labels there was no way to tell which outline was which.
+COUNTRY_STYLE = {
+    "Germany": {"fill": "#243447", "edge": "#7fa0c4", "label_at": (7.55, 50.9)},
+    "Belgium": {"fill": "#2e2a44", "edge": "#a698d1", "label_at": (4.45, 50.62)},
+    "Luxembourg": {"fill": "#3d3320", "edge": "#c9ab6d", "label_at": (6.13, 49.78)},
+    "Netherlands": {"fill": "#1f3a30", "edge": "#7fc4a0", "label_at": (5.9, 50.97)},
+    "France": {"fill": None, "edge": "#c8c8c8", "label_at": (5.05, 48.75)},
+}
+
 
 def _load_region_borders():
     """Country border outlines drawn as background context on the map panel:
@@ -451,13 +463,17 @@ def do_plot(st, mseed_path, station_filter, freqmin, freqmax, taper_max_length, 
     # -- left panel: station map colored by real arrival time --
     map_ax.set_facecolor(BG_COLOR)
     for name, points, is_closed in _load_region_borders():
+        style = COUNTRY_STYLE.get(name, {"fill": "#1c2530", "edge": "#4a5a6a", "label_at": None})
         border_lons = [p[0] for p in points]
         border_lats = [p[1] for p in points]
-        if is_closed:
-            map_ax.fill(border_lons, border_lats, facecolor="#1c2530", edgecolor="#4a5a6a",
-                         linewidth=1.0, zorder=1)
+        if is_closed and style["fill"]:
+            map_ax.fill(border_lons, border_lats, facecolor=style["fill"], edgecolor=style["edge"],
+                         linewidth=1.4, zorder=1)
         else:
-            map_ax.plot(border_lons, border_lats, color="#4a5a6a", linewidth=1.0, zorder=1)
+            map_ax.plot(border_lons, border_lats, color=style["edge"], linewidth=1.4, zorder=1)
+        if style["label_at"]:
+            map_ax.text(*style["label_at"], name, color=style["edge"], fontsize=9,
+                        fontweight="bold", style="italic", ha="center", va="center", zorder=2)
     if located:
         lons = [coords[(tr.stats.network, tr.stats.station)][1] for tr in located]
         lats = [coords[(tr.stats.network, tr.stats.station)][0] for tr in located]
@@ -466,8 +482,10 @@ def do_plot(st, mseed_path, station_filter, freqmin, freqmax, taper_max_length, 
                              edgecolor="white", linewidth=0.8, zorder=3)
         for tr, lon, lat in zip(located, lons, lats):
             map_ax.annotate(f"{tr.stats.network}.{tr.stats.station}", xy=(lon, lat),
-                             xytext=(4, 3), textcoords="offset points", color=FG_COLOR,
-                             fontsize=6.5, zorder=4)
+                             xytext=(4, 3), textcoords="offset points", color="white",
+                             fontsize=6.5, zorder=4,
+                             bbox=dict(boxstyle="round,pad=0.08", facecolor=BG_COLOR,
+                                       edgecolor="none", alpha=0.55))
         cbar = fig.colorbar(sc, ax=map_ax, pad=0.015, fraction=0.025)
         cbar.set_label("Arrival time after first station (s)", color=FG_COLOR, fontsize=8)
         cbar.ax.yaxis.set_tick_params(color=FG_COLOR)
