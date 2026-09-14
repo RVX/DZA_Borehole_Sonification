@@ -688,6 +688,7 @@ coordinates (see `merge` below).
 | `list`   | Prints every trace ID with its sample rate, duration, and UTC time range. |
 | `sonify` | Sonifies each selected trace independently into its own `.wav`. Unlike `DZA01.py`, the default is **every trace in the file** (`--station` narrows it to a substring match), since this is a whole-network event capture rather than one continuously-streaming station. |
 | `merge`  | Builds **one** composite stereo track: every station's trace is placed on a shared real-world timeline (using each trace's true absolute arrival time) and panned left/right by geographic longitude, so playback audibly sweeps across the network the way the reference video shows it visually. |
+| `plot`   | Saves a static, dark-themed picture of that same sweep: a station map colored by real arrival time, plus a record-section-style stack of every waveform ordered by arrival time — the visual counterpart to `merge`'s audio. |
 
 Defaults differ from `DZA01.py` to suit this shorter, already-tightly-cut
 dataset: `--speed-up 20` (vs. 200x) keeps the impulsive arrival + coda
@@ -709,14 +710,18 @@ python sonifimeteor.py sonify                    # sonify every trace to its own
 python sonifimeteor.py --station DEP52 sonify     # just one station (3 components)
 python sonifimeteor.py merge                     # one geographically-panned network-wide track
 python sonifimeteor.py --no-pan merge            # same, but centered / no network lookup
+python sonifimeteor.py plot                      # station map + record section, as a .png
 ```
+
+![Station map colored by real arrival time, and a record section of all 33 stations ordered by that same arrival time, for the meteor event](docs/images/meteor_record_section.png)
 
 ### Output
 
 ```
 datasets/
 ├── meteor_source/                 source .mseed + collaborator's reference files + coordinate cache
-└── sonifications_sonifimeteor/    generated audio: one .wav per trace, plus the network-wide merge
+├── sonifications_sonifimeteor/    generated audio: one .wav per trace, plus the network-wide merge
+└── plot_sonifimeteor/             generated station-map + record-section .png
 ```
 
 Unlike `DZA01.py`'s routine `datasets/sonifications/` output (regenerable
@@ -735,6 +740,8 @@ real event, and the generated audio is the curated deliverable for it.
   silently mis-placed. Each station is placed at its true real-world
   arrival offset, so the composite audibly sweeps across the network over
   its real ~11-minute span, compressed to under 34 seconds at 20x.
+- A `plot` action that renders the same wavefront sweep as a picture, so
+  the network-wide event can be seen as well as heard.
 
 ## Contributing
 

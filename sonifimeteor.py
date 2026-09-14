@@ -32,6 +32,9 @@ Examples
                                                     # listener hears the arrival sweep across the
                                                     # network the way the reference meteor.mp4
                                                     # animation shows it visually
+  py sonifimeteor.py plot                          # a static picture of that same arrival sweep:
+                                                    # a station map colored by arrival time, plus
+                                                    # a record section stacked in arrival order
 """
 import json
 import os
@@ -39,6 +42,9 @@ import sys
 import argparse
 
 import numpy as np
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 from obspy import read
 from scipy import signal
 from scipy.io import wavfile
@@ -51,6 +57,15 @@ DEFAULT_METEOR_MSEED = os.path.join(
 )
 SONIFIMETEOR_DIR = os.path.join(DATASETS_DIR, "sonifications_sonifimeteor")
 os.makedirs(SONIFIMETEOR_DIR, exist_ok=True)
+PLOT_SONIFIMETEOR_DIR = os.path.join(DATASETS_DIR, "plot_sonifimeteor")
+os.makedirs(PLOT_SONIFIMETEOR_DIR, exist_ok=True)
+
+# Same pyTREMOR-inspired dark theme as DZA01.py's plots, for visual consistency
+# across the two scripts (kept as separate constants here since this script is
+# meant to run fully standalone, independent of DZA01.py).
+BG_COLOR = "#0b0c10"
+FG_COLOR = "0.85"
+GRID_COLOR = "0.3"
 
 # The recording is only ~5-6 minutes per station, already cut tight around the
 # arrival -- a much smaller speed-up than DZA01.py's 24h-recording default (200x)
@@ -77,7 +92,7 @@ MERGE_TARGET_RATE_HZ = 100.0
 MERGE_COORD_PROVIDERS = ["ORFEUS", "EIDA", "RESIF", "GFZ", "BGR", "RASPISHAKE"]
 STATION_COORDS_CACHE = os.path.join(METEOR_INPUT_DIR, "station_coordinates_cache.json")
 
-VALID_ACTIONS = {"sonify", "list", "merge"}
+VALID_ACTIONS = {"sonify", "list", "merge", "plot"}
 
 
 def load_stream(mseed_path):
@@ -339,6 +354,130 @@ def do_merge(st, mseed_path, station_filter, speed_up_factor, freqmin, freqmax, 
     return wav_path
 
 
+def do_plot(st, mseed_path, station_filter, freqmin, freqmax, taper_max_length, use_pan):
+    """Dark-themed, two-panel static picture of the same thing 'merge' turns into
+    sound: a station map colored by real arrival time (a still analogue of
+    meteor.mp4's animation), and a record section stacking every station's
+    waveform in that same arrival order -- so the wavefront sweep is visible as
+    well as audible."""
+    if station_filter and station_filter.strip().lower() != "all":
+        traces = [tr for tr in st if station_filter.lower() in tr.id.lower()]
+        if not traces:
+            available = ", ".join(sorted(tr.id for tr in st))
+            raise SystemExit(f"--station '{station_filter}' matched no trace. Available: {available}")
+    else:
+        traces = list(st)
+
+    reps = _pick_representative_traces(traces)
+    if len(reps) < 2:
+        raise SystemExit(f"plot needs at least 2 stations; only matched {len(reps)}. "
+                          "Try a broader --station filter or omit --station.")
+
+    processed = []
+    for tr in reps:
+        try:
+            processed.append(_process_trace(tr, freqmin, freqmax, taper_max_length))
+        except Exception as exc:
+            print(f"[warn] Skipping {tr.id} from plot: {exc}", file=sys.stderr)
+    if len(processed) < 2:
+        raise SystemExit("Fewer than 2 traces survived processing; cannot build a plot.")
+
+    processed.sort(key=lambda t: t.stats.starttime)
+    ref_start = processed[0].stats.starttime
+    arrival_s = {tr.id: (tr.stats.starttime - ref_start) for tr in processed}
+    max_arrival = max(arrival_s.values()) or 1.0
+
+    coords = {}
+    if use_pan:
+        pairs = sorted({(tr.stats.network, tr.stats.station) for tr in processed})
+        print(f"[sonifimeteor] Looking up coordinates for {len(pairs)} station(s) "
+              f"(cache: {os.path.relpath(STATION_COORDS_CACHE, BASE_DIR)})...")
+        coords = _fetch_station_coords(pairs)
+
+    located_ids = {tr.id for tr in processed if coords.get((tr.stats.network, tr.stats.station))}
+    located = [tr for tr in processed if tr.id in located_ids]
+    unlocated = [tr for tr in processed if tr.id not in located_ids]
+
+    cmap = plt.get_cmap("plasma")
+    norm = plt.Normalize(vmin=0, vmax=max_arrival)
+
+    n = len(processed)
+    # Stacked rows (map on top, record section below) rather than side-by-side columns:
+    # the map wants a compact, roughly true-to-scale aspect while the record section grows
+    # taller with every extra station, so sharing one row would either squash the map or
+    # leave it surrounded by wasted blank space.
+    map_height_in = 4.6
+    sec_height_in = max(4.0, 0.28 * n)
+    fig = plt.figure(figsize=(11.5, map_height_in + sec_height_in + 1.2), facecolor=BG_COLOR)
+    gs = fig.add_gridspec(2, 1, height_ratios=[map_height_in, sec_height_in], hspace=0.32)
+    map_ax = fig.add_subplot(gs[0])
+    sec_ax = fig.add_subplot(gs[1])
+
+    # -- left panel: station map colored by real arrival time --
+    map_ax.set_facecolor(BG_COLOR)
+    if located:
+        lons = [coords[(tr.stats.network, tr.stats.station)][1] for tr in located]
+        lats = [coords[(tr.stats.network, tr.stats.station)][0] for tr in located]
+        values = [arrival_s[tr.id] for tr in located]
+        sc = map_ax.scatter(lons, lats, c=values, cmap=cmap, norm=norm, s=90,
+                             edgecolor="white", linewidth=0.8, zorder=3)
+        for tr, lon, lat in zip(located, lons, lats):
+            map_ax.annotate(f"{tr.stats.network}.{tr.stats.station}", xy=(lon, lat),
+                             xytext=(4, 3), textcoords="offset points", color=FG_COLOR,
+                             fontsize=6.5, zorder=4)
+        cbar = fig.colorbar(sc, ax=map_ax, pad=0.015, fraction=0.025)
+        cbar.set_label("Arrival time after first station (s)", color=FG_COLOR, fontsize=8)
+        cbar.ax.yaxis.set_tick_params(color=FG_COLOR)
+        plt.setp(cbar.ax.get_yticklabels(), color=FG_COLOR, fontsize=7)
+    else:
+        map_ax.text(0.5, 0.5, "No public station coordinates resolved\n(try without --no-pan)",
+                     color=FG_COLOR, fontsize=9, ha="center", va="center",
+                     transform=map_ax.transAxes)
+    map_ax.set_xlabel("Longitude (\u00b0E)", color=FG_COLOR, fontsize=8)
+    map_ax.set_ylabel("Latitude (\u00b0N)", color=FG_COLOR, fontsize=8)
+    map_ax.tick_params(colors=FG_COLOR, labelsize=7)
+    for spine in map_ax.spines.values():
+        spine.set_color(GRID_COLOR)
+    map_ax.grid(True, color=GRID_COLOR, linewidth=0.4, alpha=0.5)
+    subtitle = f"{len(located)} station(s) located"
+    if unlocated:
+        subtitle += f", {len(unlocated)} without public coordinates"
+    map_ax.set_title(f"Station map, colored by real arrival time\n({subtitle})",
+                      color="white", fontsize=9, loc="left")
+
+    # -- right panel: record section, stacked in real arrival order --
+    sec_ax.set_facecolor(BG_COLOR)
+    for i, tr in enumerate(processed):
+        data = tr.data.astype(np.float64)
+        peak = np.max(np.abs(data))
+        norm_data = data / peak if peak else data
+        times = arrival_s[tr.id] + np.arange(tr.stats.npts) / tr.stats.sampling_rate
+        color = cmap(norm(arrival_s[tr.id]))
+        sec_ax.plot(times, norm_data * 0.4 + i, color=color, linewidth=0.5)
+        sec_ax.text(-max_arrival * 0.015, i, f"{tr.stats.network}.{tr.stats.station}",
+                     color=FG_COLOR, fontsize=6.5, ha="right", va="center")
+    sec_ax.set_yticks([])
+    sec_ax.set_ylim(-1, n)
+    sec_ax.set_xlim(-max_arrival * 0.05, max_arrival * 1.05)
+    sec_ax.set_xlabel("Time since first station's arrival (s)", color=FG_COLOR, fontsize=8)
+    sec_ax.set_title(f"Record section, ordered by real arrival time ({n} stations)",
+                      color="white", fontsize=9, loc="left")
+    sec_ax.tick_params(colors=FG_COLOR, labelsize=7)
+    for spine in sec_ax.spines.values():
+        spine.set_color(GRID_COLOR)
+    sec_ax.grid(True, axis="x", color=GRID_COLOR, linewidth=0.4, alpha=0.4)
+
+    base_name = os.path.splitext(os.path.basename(mseed_path))[0]
+    fig.suptitle(f"Meteor event: {n} stations, {freqmin:g}-{freqmax:g} Hz bandpass  "
+                 f"(t=0 at {ref_start})", color="white", fontsize=11)
+    fig.subplots_adjust(left=0.12, right=0.97, top=0.93, bottom=0.06)
+    plot_path = os.path.join(PLOT_SONIFIMETEOR_DIR, f"{base_name}_record_section.png")
+    fig.savefig(plot_path, dpi=150, facecolor=fig.get_facecolor(), bbox_inches="tight")
+    plt.close(fig)
+    print(f"[sonifimeteor] Saved plot to {plot_path} ({n} traces, {len(located)} located)")
+    return plot_path
+
+
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Sonify a meteoroid-event seismic recording (multi-network, per-station "
@@ -348,8 +487,9 @@ def parse_args():
     )
     parser.add_argument(
         "actions", nargs="*", default=None,
-        help="'sonify' (default), 'list' (print available station/channel IDs), and/or 'merge' "
-             "(one composite track with every station time-aligned and panned by geography)",
+        help="'sonify' (default), 'list' (print available station/channel IDs), 'merge' "
+             "(one composite track with every station time-aligned and panned by geography), "
+             "and/or 'plot' (a static map + record-section picture of the same arrival sweep)",
     )
     parser.add_argument(
         "--file", default=DEFAULT_METEOR_MSEED,
@@ -380,9 +520,9 @@ def parse_args():
     )
     parser.add_argument(
         "--no-pan", action="store_true",
-        help="For 'merge': skip the FDSN/EIDA coordinate lookup and stereo panning, producing a "
-             "centered (still time-aligned) track. Useful offline or if you don't want the "
-             "network calls.",
+        help="For 'merge'/'plot': skip the FDSN/EIDA coordinate lookup and geographic panning, "
+             "producing a centered (still time-aligned) merge, or a plot with an unlocated map "
+             "panel. Useful offline or if you don't want the network calls.",
     )
     return parser.parse_args()
 
@@ -420,6 +560,10 @@ def main():
     if "merge" in actions:
         do_merge(st, args.file, args.station, args.speed_up, args.freqmin, args.freqmax,
                  args.taper_max_length, use_pan=not args.no_pan)
+
+    if "plot" in actions:
+        do_plot(st, args.file, args.station, args.freqmin, args.freqmax,
+                args.taper_max_length, use_pan=not args.no_pan)
 
 
 if __name__ == "__main__":
