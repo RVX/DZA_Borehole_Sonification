@@ -17,6 +17,11 @@ retrieval via [ObsPy](https://docs.obspy.org/), standard instrument-response
 removal and bandpass filtering, and a transparent "resample the timebase"
 audification method — no proprietary DSP, no hidden steps.
 
+This repository also includes a second, standalone script,
+[`sonifimeteor.py`](#meteor-event-sonification-sonifimeteorpy), built around
+one specific real dataset: a multi-station recording of a meteoroid
+atmospheric entry, contributed by an external collaborating scientist.
+
 **Author:** Víctor Mazón Gardoqui, July 2026
 
 **Scientific Support:** Mike Lindner
@@ -91,6 +96,7 @@ whole figure is self-explanatory without cross-referencing the README:
 - [Output folder layout](#output-folder-layout)
 - [Data source and limitations](#data-source-and-limitations)
 - [Known limitations / things to be aware of](#known-limitations--things-to-be-aware-of)
+- [Meteor event sonification (`sonifimeteor.py`)](#meteor-event-sonification-sonifimeteorpy)
 - [Contributing](#contributing)
 - [Citation](#citation)
 - [License](#license)
@@ -636,6 +642,99 @@ data locally; the FDSN archive is the source of truth.
   positive; `--latency`/`--max-latency` are validated to be non-negative
   and consistent with each other. Malformed FDSN responses or network
   errors surface as Python exceptions with the underlying error message.
+
+## Meteor event sonification (`sonifimeteor.py`)
+
+A second, independent CLI script, runnable in parallel to `DZA01.py`
+without any conflict (separate input folder, separate output folder,
+separate `.wav` filenames). Where `DZA01.py` continuously fetches fresh
+data from one growing station network, `sonifimeteor.py` works from one
+fixed, already-downloaded dataset: a real meteoroid atmospheric entry
+recorded, at the same moment, across dozens of independent seismic
+stations spanning several national/regional European networks.
+
+### Goals
+
+- Turn an otherwise inaudible, multi-station seismic recording of a real
+  meteor event into something a listener can actually experience.
+- Go beyond simply speeding up a single trace (as `DZA01.py` does for one
+  station): let a listener feel the event the way it physically happened —
+  a wavefront that took several minutes to sweep outward from the
+  stations nearest the fireball's ground track to the furthest ones, each
+  station registering the arrival at a different, real moment.
+- A reference video supplied alongside the raw data visualizes exactly
+  this: a map with every station colored by how many seconds after the
+  event it detected the arrival. The `merge` action (below) is a sonic
+  analogue of that same idea — geography and timing rendered as sound
+  instead of as a map animation.
+
+### Data source
+
+The source `.mseed` file lives in `datasets/meteor_source/`, contributed
+by an external collaborating scientist. It has instrument response
+already removed, and each of its 99 traces is individually cut tight
+around that station's own arrival (~1 min before, ~4 min after) — so
+absolute start times genuinely differ station to station, encoding real
+travel time. It spans **33 stations across 8 networks** (`KB`, `LE`,
+`GR`, `BE`, `FR`, `NH`, `AM`, `GE`) across the Germany/Belgium/France
+border region. `datasets/meteor_source/` also keeps the collaborator's
+own reference script/plot/video and a cache of resolved station
+coordinates (see `merge` below).
+
+### Actions
+
+| Action   | What it does                                                              |
+|----------|----------------------------------------------------------------------------|
+| `list`   | Prints every trace ID with its sample rate, duration, and UTC time range. |
+| `sonify` | Sonifies each selected trace independently into its own `.wav`. Unlike `DZA01.py`, the default is **every trace in the file** (`--station` narrows it to a substring match), since this is a whole-network event capture rather than one continuously-streaming station. |
+| `merge`  | Builds **one** composite stereo track: every station's trace is placed on a shared real-world timeline (using each trace's true absolute arrival time) and panned left/right by geographic longitude, so playback audibly sweeps across the network the way the reference video shows it visually. |
+
+Defaults differ from `DZA01.py` to suit this shorter, already-tightly-cut
+dataset: `--speed-up 20` (vs. 200x) keeps the impulsive arrival + coda
+recognizable rather than compressing it into a blip, and the 1–10 Hz
+bandpass matches the collaborator's own reference script.
+
+For `merge`, station coordinates are resolved best-effort from public
+FDSN/EIDA providers (ORFEUS, EIDA, RESIF, GFZ, BGR, RaspberryShake) and
+cached to `datasets/meteor_source/station_coordinates_cache.json` so
+repeat runs don't re-query the network. A handful of stations belong to a
+private deployment with no public metadata; those are simply centered in
+the stereo field instead of panned, and the script prints a warning
+naming them. Pass `--no-pan` to skip the coordinate lookup entirely and
+get a centered/offline merge.
+
+```bash
+python sonifimeteor.py list                      # inspect the 99 available traces
+python sonifimeteor.py sonify                    # sonify every trace to its own .wav
+python sonifimeteor.py --station DEP52 sonify     # just one station (3 components)
+python sonifimeteor.py merge                     # one geographically-panned network-wide track
+python sonifimeteor.py --no-pan merge            # same, but centered / no network lookup
+```
+
+### Output
+
+```
+datasets/
+├── meteor_source/                 source .mseed + collaborator's reference files + coordinate cache
+└── sonifications_sonifimeteor/    generated audio: one .wav per trace, plus the network-wide merge
+```
+
+Unlike `DZA01.py`'s routine `datasets/sonifications/` output (regenerable
+from a live FDSN fetch, so it's gitignored), everything under
+`datasets/meteor_source/` and `datasets/sonifications_sonifimeteor/` is
+committed directly to this repository — this is a one-off, non-repeatable
+real event, and the generated audio is the curated deliverable for it.
+
+### What's been achieved so far
+
+- All 99 traces sonified individually (detrend, 1–10 Hz bandpass, short
+  fixed-length taper, 20x speed-up) and committed.
+- A 33-station network-wide `merge`: 30 of 33 stations resolved to real
+  coordinates and panned by longitude; the remaining 3 (a private local
+  deployment with no public station metadata) are centered rather than
+  silently mis-placed. Each station is placed at its true real-world
+  arrival offset, so the composite audibly sweeps across the network over
+  its real ~11-minute span, compressed to under 34 seconds at 20x.
 
 ## Contributing
 
